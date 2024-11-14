@@ -1,0 +1,18 @@
+Functions for breaking:
+faillink
+fixLink
+failNode
+
+Functions for testing:
+Create
+query 
+choose 
+view
+viewall
+
+Order of operations
+1. Setup gemini API
+2. Connect all client to central server
+3. Run multi-paxos to choose leader
+
+Split up function

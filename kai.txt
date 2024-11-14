@@ -1,0 +1,78 @@
+1 Overview
+
+build a fault tolerant LLM
+each server is a point of interaction and backup
+goal: build LLM accross three servers/nodes (Mult-Paxos)
+quires using API calls
+-Context is history of queries and answers between a user and LLM
+-query string only appended if consensus
+-servers forward answer from gemini back to client
+-Users should be able to read a context
+None of the servers are malicious but they might crash
+
+2 LLM Application
+
+Key value store - stores all contexts
+Local copies should be kept consistent with each other
+Should support the follwoing write:
+-Create a context
+-Create a query
+-save a selected answer
+And following read:
+-View a context
+-View all contexts
+
+3 Gemini API
+
+Hide API key from public repo
+Don't use multi-query conversations  cause unable to support insertion of chat history in presense of crash
+
+4 Connection details
+
+every node is connected to all other nodes through a central server
+Central server should be able to fail links, crash nodes, and fix links
+NW server should support:
+1. faillink 
+2. fixLink - maybe use a dct to keep track of active annd nonactive links
+3. failNode
+
+5 Concensus Protocol
+Each node should keep track of leader
+multi paxos means we keep the leader
+ballot number <seq_num, pid, op_num>
+1. Election phase
+2. obtain promise from majority
+3. acceptor should not promis if op_num is larger than that from ballot_num?
+4. Leader maintain queue of pending operations
+5. leader broadcasts accept messages to all acceptors
+6. acceptor should not reply accpeted if applied op is greater than op_num?
+7. Decision phase
+
+6 Failures and Recovery
+
+crashed nodes should contact leader to download all the context
+
+7 Testing
+
+Prioritize as following:
+1. multi-paxos op (no failure)
+2. Crash failure
+3. Network partition and reconnection
+
+7.1 Expected Input
+
+Each node should support following:
+Create
+query
+choose
+Viewviewall
+
+7.2 Expected Output
+
+New Context
+New query
+Chosen answer on with
+prepare/promise/accept/accepted/decide
+timeout
+
+
