@@ -21,21 +21,15 @@ model = genai.GenerativeModel("gemini-1.5-flash")
 
 
 
-my_socket= None
 client_sockets = []
-server_sockets =[]
 running = True
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client_id = 0
 
 
 def handle_exit():
     for client in client_sockets:
         client.close()
-    for server in server_sockets:
-        server.close()
-    if my_socket:
-        my_socket.close()
-    server_sockets.clear()  
     client_sockets.clear()  
     sys.stdout.flush()
     sys.exit(0)
@@ -43,19 +37,25 @@ def handle_exit():
 
 def talk_to_server(message, client_id):
     global active_peer_threads
-    global server_socket
+    global client_socket
     if message.lower() == "exit":
         handle_exit()
     else:
-        server_socket.send(message.encode('utf-8'))
-        response = server_socket.recv(1024).decode('utf-8')
+        client_socket.send(message.encode('utf-8'))
+        response = client_socket.recv(1024).decode('utf-8')
         print(f"received {response}")
         #handle_function() ie create,query, 
     
 
 def start_client(): #Allows other clients to talk to you, also connect to other clients from peer list
-    global server_socket
-    server_socket.connect(('127.0.0.1', port))
+    global client_socket
+    global client_id
+    client_socket.connect(('127.0.0.1', port))
+    client_id = client_socket.getsockname()[1]
+    client_socket.send(f"{client_id}".encode('utf-8'))
+    response = client_socket.recv(1024).decode('utf-8')
+    if response != "Success":
+        print("Failure to send server clientid")
     while running:
             message = input()
             threading.Thread(target=talk_to_server, args=(message, client_id), daemon=True).start()
@@ -65,9 +65,9 @@ def start_client(): #Allows other clients to talk to you, also connect to other 
 
 if __name__ == "__main__":
     global port
-    global client_id
+    # global client_id
     if len(sys.argv) < 3:
         sys.exit(1)
     port = int(sys.argv[2])
-    client_id = int(sys.argv[1])
+    # client_id = int(sys.argv[1])
     start_client()

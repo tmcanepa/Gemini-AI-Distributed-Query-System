@@ -6,6 +6,7 @@ import time
 
 clients = []
 running = True
+id_dct = []
 def primary_handle_client(client_socket): #Everytime a client connects, send all other clients the updated peer list and handles input from clients
     global running
     while running:
@@ -70,13 +71,16 @@ def start_server(PORT): #Begines the input thread and accepts clients
     server_socket.bind(('127.0.0.1', int(PORT))) 
     server_socket.listen(10)  
     threading.Thread(target=primary_input_thread, daemon=True).start()
-
     while running:
         try:
             client_socket, _ = server_socket.accept()
             clients.append(client_socket)  
+            client_id = client_socket.recv(1024).decode('utf-8')
+            id_dct.append(client_id)
+            client_socket.send("Success".encode('utf-8')) 
             client_handler = threading.Thread(target=primary_handle_client, args=(client_socket,), daemon=True) #handles incoming clinets
             client_handler.start()  
+            print(id_dct)
         finally:
             pass
     server_socket.close()
