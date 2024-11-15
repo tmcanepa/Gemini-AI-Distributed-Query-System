@@ -1,0 +1,73 @@
+current_leader = None #can be client 1,2,3
+max_proposal_id = 0
+ballot_number = 0
+
+Client 1
+  - wants to be leader
+-sends propose message to server
+
+propose("prepare" mesaage, ballot_number)
+  - ballot number just adds 1 to the current ballot number
+- Propose gets sent to server
+
+Server
+  - gets "prepare" message from client 1
+brodcast_prepare("prepare" message, ballot_number)
+  - sends prepare message and ballot number to other clients
+
+Client 2/3
+  - gets "prepare message from server"
+  - if new ballot_number received > current stored ballot then promise
+promise("promise" message, ballot_number, accept_num(the last accepted ballot number this client accepted), accept_val(the accepted value associated with this last accepted ballot num))
+
+Server
+  -gets promise messages from clients
+  - if there are a majority of prmise messeges it sends the promise messages to the original proposal client
+return_promise()
+  -sends all other client promise messages
+
+Client 1
+  -receives promise messages from server
+  - if all accept_values ate null then set myVal to the value it wants to propose
+  - else set myVal to the value associated with the greatest ballot number
+accept("accept" message, ballot_number, myVal)
+  -send to server
+
+
+Server
+  - receive accept message from client1
+brodcast_accept("accept" message, ballot_number, myVal)
+  - sends accept message and ballot number to other clients
+
+Client 2/3
+  -receive accept message from client
+  - if the ballot_number sent in the accept is > the current stored ballot
+    the newballot gets stored
+  - the stored ballot at each client becomes the accepted ballot that was sent
+  - the stored value at each client is the value that was sent (myVal)
+send_accepted("accepted" message, ballot_number, myVal)
+  - send accepted message to server
+
+Server
+  - when recieve majority of "accepted" messages from clients brodcast back to original leader
+return_accepted()
+  - send all other client accepted messages
+
+client1
+  - receive accepted messages
+  -send decide messages to server to send to other clients
+decide("decide" message, ballot_num, myVal)
+ - send to server to brodcast
+
+Server
+  -recieve decide message
+brodcast_decide("decide" message, ballot_num, myVal)
+  - send decide to all other clients
+
+
+Client2/3
+  - recieve decide message
+  - use the value that the decide message has
+return_decide("decide" message)
+  - send back a decide to the propser so they know you have updated your local information
+
