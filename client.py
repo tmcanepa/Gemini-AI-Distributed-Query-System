@@ -68,6 +68,9 @@ def promise(bal, accept_num, accept_val, proposer):
 def accept(ballot_num, promiser):
     client_socket.send(f"accept {ballot_num} {promiser} {client_id}".encode('utf-8'))
 
+def accepted(b, acceptor):
+    client_socket.send(f"accepted {b} {acceptor} {client_id}".encode('utf-8'))
+
 def handle_messages(): #handles 
     message = client_socket.recv(1024).decode('utf-8')
     if message.startswith('prepare'):
@@ -76,10 +79,18 @@ def handle_messages(): #handles
             promise(bal, accept_num, accept_val, proposer)
     elif message.startswith('promise'):
         _, ballot_num, accept_num, accept_val, _, promiser = message.split()
-            accept(ballot_num, promiser)
-    if message.startswith('accept'):
-        _, b, promiser, acceptor = messaag
-        
+        accept(ballot_num, promiser)
+    elif message.startswith('accept'):
+        _, b, promiser, acceptor = message.split()
+        accepted(b, acceptor)
+    elif message.startswith("accepted"):
+        pass
+    elif message.startswith("create"):
+        create_context(message)
+    elif message.startswith("query"):
+        query_context(message)
+    elif message.startswith("choose"):
+        choose_response(message)
         
 
     return
@@ -87,7 +98,7 @@ def handle_messages(): #handles
 
 def create_context(message):
     if curr_leader == client_id:
-        _ , context_id = message.split()
+        context_id = message.split()[1]
         key_value_store[context_id] = ""
     else:
         message = f"{message} {client_id} {curr_leader}"
@@ -95,7 +106,8 @@ def create_context(message):
 
 def query_context(message):
     global leader_queue, query_queue
-    _ , context_id, query = message.split()
+    context_id = message.split()[1]
+    query = message.split()[2]
     if curr_leader == client_id:
         leader_queue.put((context_id, query))
     else:
@@ -127,7 +139,7 @@ if __name__ == "__main__":
     ballot_num[1] = client_id
     start_client()
     if(client_id == 3):
-        propose("prepare", ballot_num, 1,2)
+        propose("prepare", 1,2)
     while running:
         message = input()
         if message.startswith('create'):
