@@ -7,6 +7,7 @@ import time
 import sys
 import heapq
 import queue
+import ast
 
 
 load_dotenv()
@@ -30,8 +31,8 @@ client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client_id = 0
 curr_leader = 0
 ballot_num = [0,0]
-accept_num = [0,0]
-accept_val = None
+# accept_num = [0,0]
+# accept_val = None
 
 
 
@@ -44,41 +45,50 @@ def handle_exit():
 
     
 
-def start_client(): #Allows other clients to talk to you, also connect to other clients from peer list
+def start_client(): #Connect to the coordinator and give it your id and port number 
     global client_socket
     global client_id
     client_socket.connect(('127.0.0.1', port))
     port_num = client_socket.getsockname()[1]
-    client_socket.send(f"{client_id} {port_num}".encode('utf-8'))
-    response = client_socket.recv(1024).decode('utf-8')
+    client_socket.send(f"{client_id} {port_num}".encode())
+    response = client_socket.recv(1024).decode()
     if response != "Success":
         print("Failure to send server clientid")
-    threading.Thread(target = handle_messages, ).start() #Needed for accept, ... (function name will change as more receive threads are understood)
+    threading.Thread(target = handle_messages, ).start() #Needed for receiving prepare messages etc..
 
 
-def propose(message, send_id1, send_id2): #starts the leader election 
+def propose(send_id1, send_id2): #starts the leader election 
     global ballot_num
     ballot_num[0] += 1
-    client_socket.send(f"{message} {ballot_num} {client_id} {send_id1} {send_id2}").encode('utf-8')
+    print("Sending prepare")
+    client_socket.send(f"prepare {ballot_num} {client_id} {send_id1} {send_id2}".encode())
     return
 
-def promise(bal, accept_num, accept_val, proposer):
-    client_socket.send(f"promise {bal} {accept_num} {accept_val} {proposer} {client_id}".encode('utf-8'))
+def promise(bal, proposer):
+    client_socket.send(f"promise {bal} {proposer} {client_id}".encode())
 
 def accept(ballot_num, promiser):
-    client_socket.send(f"accept {ballot_num} {promiser} {client_id}".encode('utf-8'))
+    client_socket.send(f"accept {ballot_num} {promiser} {client_id}".encode())
 
-def handle_messages(): #handles 
-    message = client_socket.recv(1024).decode('utf-8')
+def handle_messages(): #handles receiving prepare messages etc..
+    global curr_leader
+    message = client_socket.recv(1024).decode()
     if message.startswith('prepare'):
-        _, bal, proposer, _, _  = message.split()
+        parts  = message.split()
+        bal = ast.literal_eval(''.join(parts[1:3]))
+        proposer = parts[3]
+        print(bal, ballot_num)
         if bal >= ballot_num:
-            promise(bal, accept_num, accept_val, proposer)
+            curr_leader = proposer
+            print(f"{curr_leader} is the leader")
+            promise(bal, proposer)
     elif message.startswith('promise'):
-        _, ballot_num, accept_num, accept_val, _, promiser = message.split()
-            accept(ballot_num, promiser)
-    if message.startswith('accept'):
-        _, b, promiser, acceptor = messaag
+
+        # _, ballot_num, accept_num, accept_val, _, promiser = message.split()
+        # accept(ballot_num, promiser)
+        curr_leader = client_id
+        print(f"Leader election is complete, {curr_leader} is leader")
+
         
         
 
@@ -104,7 +114,7 @@ def query_context(message):
 
 def send_to_leader(message):
     message = "{message} {client_id} {curr_leader}"
-    client_sockets[curr_leader - 1].send(message.encode('utf-8'))
+    client_sockets[curr_leader - 1].send(message.encode())
     
 def choose_response(message):
     return
@@ -126,8 +136,8 @@ if __name__ == "__main__":
     client_id = int(sys.argv[1])
     ballot_num[1] = client_id
     start_client()
-    if(client_id == 3):
-        propose("prepare", ballot_num, 1,2)
+    if(client_id == 3): #This will be the initial leader proposer
+        propose(1,2)
     while running:
         message = input()
         if message.startswith('create'):

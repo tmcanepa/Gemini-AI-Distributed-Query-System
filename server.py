@@ -12,45 +12,56 @@ def primary_handle_client(client_socket): #Everytime a client connects, it has i
     global running
     while running:
         try:
-            message = client_socket.recv(1024).decode('utf-8') 
+            message = client_socket.recv(1024).decode() 
+            print(message)
             if not message:
                 break
             if message.startswith("prepare"):
                 parts = message.split()
-                send_id1 = parts[3]
-                send_id2 = parts[4]
-                print(f"Received prepare")
-                if(fail_dct[id_dct[send_id1]] == True): #send to both other clients
-                    threading.Thread(target=server_to_client, args=(clients[send_id1-1], message), daemon=True).start()
+                send_id1 = parts[4]
+                send_id2 = parts[5]
+                print(f"Received ids {send_id1} {send_id2}")
+                # print(f"clients {clients}")
+                print(f"id dict {id_dct}")
+                print(f"fai dct {fail_dct}")
+                if(fail_dct[id_dct[send_id1]] == True): #send prepare to both other clients
+                    forward = threading.Thread(target=server_to_client, args=(clients[(int(send_id1)-1)], message), daemon=True)
+                    forward.start()
                 if(fail_dct[id_dct[send_id2]] == True):
-                    threading.Thread(target=server_to_client, args=(clients[send_id2-1], message), daemon=True).start()
+                    forward = threading.Thread(target=server_to_client, args=(clients[(int(send_id2)-1)], message), daemon=True)
+                    forward.start()
             elif message.startswith("promise"): #send back to proposer
-                _, _, _, _, proposer, promiser = message.split()
+                parts =  message.split()
+                proposer = parts[3]
+                # _, _, _, _, proposer, promiser = message.split()
                 if fail_dct[id_dct[proposer]] == True:
-                    threading.Thread(target=server_to_client, args=(clients[proposer-1], message), daemon=True).start()
-            elif message.startswith("accept"): #send back to promiser
-                _, b, promiser, acceptor = message.split()
-                if fail_dct[id_dct[promiser]] == True:
-                    threading.Thread(target=server_to_client, args=(clients[promiser-1], message), daemon=True).start()
-            elif message.startswith("accepted"): #send back to promiser
-                _, b,  acceptor, acceptedor = message.split()
-                if fail_dct[id_dct[promiser]] == True:
-                    threading.Thread(target=server_to_client, args=(clients[promiser-1], message), daemon=True).start()
-            
-            elif message.startswith(create)
+                    threading.Thread(target=server_to_client, args=(clients[(int(proposer)-1)], message), daemon=True).start()
+            # elif message.startswith("accept"): #send back to promiser
+            #     _, b, promiser, acceptor = message.split()
+            #     if fail_dct[id_dct[promiser]] == True:
+            #         threading.Thread(target=server_to_client, args=(clients[promiser-1], message), daemon=True).start()
+            # elif message.startswith("accepted"): #send back to promiser
+            #     _, b,  acceptor, acceptedor = message.split()
+            #     if fail_dct[id_dct[promiser]] == True:
+            #         threading.Thread(target=server_to_client, args=(clients[promiser-1], message), daemon=True).start()
                 
-        except ConnectionResetError:
+        except ConnectionResetError as e:
+            print(e)
             break
         except Exception as e:
+            print(e)
             break
     client_socket.close() 
 
 def server_to_client(client_socket, message): #handles send messages from server to clients
+    print(f"Forwarded {message}")
     try:
         time.sleep(3)
-        client_socket.send(message.encode('utf-8'))  
+        client_socket.send(message.encode())  
     except Exception as e:
+        print(e)
         pass
+    return
 
 
 
@@ -68,6 +79,7 @@ def handle_exit(): #handles exits
         try:
             sock.close()
         except Exception as e:
+            print(e)
             pass
     clients.clear()  
     sys.stdout.flush()
@@ -86,10 +98,10 @@ def start_server(PORT): #Begins the input thread and accepts clients
         try:
             client_socket, _ = server_socket.accept()
             clients.append(client_socket) #This only tracks order if clients are accepted as 1,2,3
-            client_id, port_num = client_socket.recv(1024).decode('utf-8').split()
+            client_id, port_num = client_socket.recv(1024).decode().split()
             id_dct[client_id] = port_num
             fail_dct[port_num] = True
-            client_socket.send("Success".encode('utf-8')) 
+            client_socket.send("Success".encode()) 
             client_handler = threading.Thread(target=primary_handle_client, args=(client_socket,), daemon=True) #handles incoming clinets
             client_handler.start()  
             print(id_dct)
