@@ -10,41 +10,34 @@ id_dct = {}
 fail_dct = {}
 def primary_handle_client(client_socket): #Everytime a client connects, it has its own thread to communicate with the server
     global running
+    buffer = ""#Need this because messages were being concatenated
     while running:
         try:
             message = client_socket.recv(1024).decode() 
-            print(message)
-            if not message:
-                break
-            if message.startswith("prepare"):
+            buffer += message
+            while '\n' in buffer:
+                message, buffer = buffer.split('\n', 1)
                 parts = message.split()
-                send_id1 = parts[4]
-                send_id2 = parts[5]
-                print(f"Received ids {send_id1} {send_id2}")
-                # print(f"clients {clients}")
-                print(f"id dict {id_dct}")
-                print(f"fai dct {fail_dct}")
-                if(fail_dct[id_dct[send_id1]] == True): #send prepare to both other clients
-                    forward = threading.Thread(target=server_to_client, args=(clients[(int(send_id1)-1)], message), daemon=True)
-                    forward.start()
-                if(fail_dct[id_dct[send_id2]] == True):
-                    forward = threading.Thread(target=server_to_client, args=(clients[(int(send_id2)-1)], message), daemon=True)
-                    forward.start()
-            elif message.startswith("promise"): #send back to proposer
-                parts =  message.split()
-                proposer = parts[3]
-                # _, _, _, _, proposer, promiser = message.split()
-                if fail_dct[id_dct[proposer]] == True:
-                    threading.Thread(target=server_to_client, args=(clients[(int(proposer)-1)], message), daemon=True).start()
-            # elif message.startswith("accept"): #send back to promiser
-            #     _, b, promiser, acceptor = message.split()
-            #     if fail_dct[id_dct[promiser]] == True:
-            #         threading.Thread(target=server_to_client, args=(clients[promiser-1], message), daemon=True).start()
-            # elif message.startswith("accepted"): #send back to promiser
-            #     _, b,  acceptor, acceptedor = message.split()
-            #     if fail_dct[id_dct[promiser]] == True:
-            #         threading.Thread(target=server_to_client, args=(clients[promiser-1], message), daemon=True).start()
-                
+                print(message)
+                if not message:
+                    break
+                #This  is if you want to forward to the other 2 servers
+                if message.startswith("prepare") or message.startswith("propose_query") or message.startswith("propose_create") or message.startswith("decide_query") or message.startswith("decide_create"):
+                    send_id1 = parts[-2]
+                    send_id2 = parts[-3]
+                    # print(f"Received ids {send_id1} {send_id2}")
+                    # # print(f"clients {clients}")
+                    # print(f"id dict {id_dct}")
+                    # print(f"fail dct {fail_dct}")
+                    if(fail_dct[id_dct[send_id1]] == True): #send prepare to both other clients
+                        threading.Thread(target=server_to_client, args=(clients[(int(send_id1)-1)], message), daemon=True).start()
+                    if(fail_dct[id_dct[send_id2]] == True):
+                        threading.Thread(target=server_to_client, args=(clients[(int(send_id2)-1)], message), daemon=True).start()
+                #This is for forwarding to 1 other server
+                elif message.startswith("promise") or message.startswith("accept") or message.startswith("query") or message.startswith("ack_leader_queued") or message.startswith("GEMINI"): #send back to proposer
+                    forward = parts[1]
+                    if fail_dct[id_dct[forward]] == True:
+                        threading.Thread(target=server_to_client, args=(clients[(int(forward)-1)], message), daemon=True).start()
         except ConnectionResetError as e:
             print(e)
             break
@@ -54,10 +47,10 @@ def primary_handle_client(client_socket): #Everytime a client connects, it has i
     client_socket.close() 
 
 def server_to_client(client_socket, message): #handles send messages from server to clients
-    print(f"Forwarded {message}")
     try:
         time.sleep(3)
-        client_socket.send(message.encode())  
+        client_socket.send(f"{message}\n".encode())  
+        print(f"Forwarded {message}")
     except Exception as e:
         print(e)
         pass
