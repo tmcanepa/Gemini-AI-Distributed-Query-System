@@ -2,42 +2,59 @@ import socket
 import threading
 import sys
 import time
-
+import ast
+import json
 
 clients = []
 running = True
 id_dct = {}
 fail_dct = {}
+def is_json(message):
+    try:
+        # Attempt to parse the string as JSON
+        json_object = json.loads(message)
+        return True, json_object  # It is JSON and return the parsed object
+    except json.JSONDecodeError:
+        return False, message  # It is not JSON, return the original string
+    
 def primary_handle_client(client_socket): #Everytime a client connects, it has its own thread to communicate with the server
     global running
-    buffer = ""#Need this because messages were being concatenated
+    buffer = "" #Need this because messages were being concatenated
     while running:
         try:
             message = client_socket.recv(1024).decode() 
             buffer += message
+            # print(f"IS THIS JSON {message}")
+            # print(f"should i convert {message["type"]}")
             while '\n' in buffer:
                 message, buffer = buffer.split('\n', 1)
-                parts = message.split()
-                print(message)
-                if not message:
-                    break
-                #This  is if you want to forward to the other 2 servers
-                if message.startswith("prepare") or message.startswith("propose_query") or message.startswith("propose_create") or message.startswith("decide_query") or message.startswith("decide_create"):
-                    send_id1 = parts[-2]
-                    send_id2 = parts[-3]
-                    # print(f"Received ids {send_id1} {send_id2}")
-                    # # print(f"clients {clients}")
-                    # print(f"id dict {id_dct}")
-                    # print(f"fail dct {fail_dct}")
-                    if(fail_dct[id_dct[send_id1]] == True): #send prepare to both other clients
-                        threading.Thread(target=server_to_client, args=(clients[(int(send_id1)-1)], message), daemon=True).start()
-                    if(fail_dct[id_dct[send_id2]] == True):
-                        threading.Thread(target=server_to_client, args=(clients[(int(send_id2)-1)], message), daemon=True).start()
-                #This is for forwarding to 1 other server
-                elif message.startswith("promise") or message.startswith("accept") or message.startswith("query") or message.startswith("ack_leader_queued") or message.startswith("GEMINI"): #send back to proposer
-                    forward = parts[1]
-                    if fail_dct[id_dct[forward]] == True:
-                        threading.Thread(target=server_to_client, args=(clients[(int(forward)-1)], message), daemon=True).start()
+                print(f"received {message}")
+                bool_json, message = is_json(message)
+                if not bool_json:
+                    parts = message.split()
+                    if not message:
+                        break
+                    #This  is if you want to forward to the other 2 servers
+                    if message.startswith("prepare") or message.startswith("propose_query") or message.startswith("propose_choose") or message.startswith("propose_create") or message.startswith("decide_query") or message.startswith("decide_choose") or message.startswith("decide_create"):
+                        send_id1 = parts[-2]
+                        send_id2 = parts[-3]
+                        if(fail_dct[id_dct[send_id1]] == True): #send prepare to both other clients
+                            threading.Thread(target=server_to_client, args=(clients[(int(send_id1)-1)], message, "string"), daemon=True).start()
+                        if(fail_dct[id_dct[send_id2]] == True):
+                            threading.Thread(target=server_to_client, args=(clients[(int(send_id2)-1)], message, "string"), daemon=True).start()
+                    #This is for forwarding to 1 other server
+                    elif message.startswith("promise") or message.startswith("accept") or message.startswith("query") or message.startswith("ack_leader_queued") or message.startswith("GEMINI"): #send back to proposer
+                        forward = parts[1]
+                        if fail_dct[id_dct[forward]] == True:
+                            threading.Thread(target=server_to_client, args=(clients[(int(forward)-1)], message, "string"), daemon=True).start()
+                else: #Process it as json string
+                    message_type = message['type']
+                    print(f"Found a json string with type {message_type}!!!")
+                    if message_type == "forward_to_leader" or message_type == "ack_leader_queued":
+                        forward = message["curr_leader"]
+                        print(f"Forwarding message = {message} to leader = {forward}")
+                        if fail_dct[id_dct[str(forward)]] == True:
+                            threading.Thread(target=server_to_client, args=(clients[(int(forward)-1)], message, "json"), daemon=True).start()
         except ConnectionResetError as e:
             print(e)
             break
@@ -46,17 +63,21 @@ def primary_handle_client(client_socket): #Everytime a client connects, it has i
             break
     client_socket.close() 
 
-def server_to_client(client_socket, message): #handles send messages from server to clients
-    try:
-        time.sleep(3)
-        client_socket.send(f"{message}\n".encode())  
-        print(f"Forwarded {message}")
-    except Exception as e:
-        print(e)
-        pass
+def server_to_client(client_socket, message, type): #handles send messages from server to clients
+    time.sleep(3)
+    if type == "string":
+        try:
+            client_socket.send(f"{message}\n".encode())  
+            print(f"Forwarded {message}")
+        except Exception as e:
+            print(e)
+    elif type == "json":
+        try:
+            client_socket.send((json.dumps(message)+'\n').encode())  
+            print(f"Forwarded {message}")
+        except Exception as e:
+            print(e)
     return
-
-
 
 def primary_input_thread(): #primary input thread
     global running
@@ -98,7 +119,8 @@ def start_server(PORT): #Begins the input thread and accepts clients
             client_handler = threading.Thread(target=primary_handle_client, args=(client_socket,), daemon=True) #handles incoming clinets
             client_handler.start()  
             print(id_dct)
-        finally:
+        except Exception as e:
+            print(e)
             pass
     server_socket.close()
 
