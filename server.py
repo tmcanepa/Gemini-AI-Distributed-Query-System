@@ -71,7 +71,7 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
                         if forward in fail_dct and fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
                             threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
                     elif message_type == "inherit_kvs":
-                        forward = message["leader"]
+                        forward = message["proposer"]
                         if fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
                             threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
                     elif message_type == "ack_inherit_kvs":

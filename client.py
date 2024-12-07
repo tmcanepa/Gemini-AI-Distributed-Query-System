@@ -165,7 +165,6 @@ def inherit_kvs(bal, proposer):
         "ballot_num": bal,
         "proposer": proposer,
         "client_id": client_id,
-        "leader": curr_leader
     })+'\n').encode())
     return
 
@@ -182,6 +181,9 @@ def handle_messages():
             message, buffer = buffer.split('\n', 1)
             bool_json, message = server.is_json(message)
             print(f"Received {message}")
+            if message[ballot_num[2]] > ballot_num[2] + 1:
+                curr_leader = message['proposer']
+                inherit_kvs(message['ballot_num'], curr_leader)
             if bool_json:
                 message_type = message['type']
                 # print(f"Received a JSON message with type {message_type}!!!")
