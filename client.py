@@ -20,6 +20,7 @@ genai.configure(api_key=gemini_api)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 key_value_store = {}
+decide_count = {}
 leader_queue = queue.Queue()
 operation_queue = queue.Queue()
 running = True
@@ -162,9 +163,8 @@ def inherit_kvs(bal, proposer):
         "type": "inherit_kvs",
         "ballot_num": bal,
         "proposer": proposer,
-        "send_id1": send_id1,
-        "send_id2": send_id2,
-        "client_id": client_id
+        "client_id": client_id,
+        "leader": curr_leader
     })+'\n').encode())
     return
 
@@ -256,14 +256,14 @@ def handle_messages():
                             if not leader_queue.empty(): #THIS NEEDS TO BE FIXED ONCE THERE ARE MULTIPLE DECIDES
                                 leader_queue.get() #Remove from leader queue now that query is decided
                                 consensus_flag = True
+                    bal = message['ballot_num']
+                    decide_count[bal[2]] += 1
                     context_id = message['context_id']
                     query_from = message['query_from']
                     query = message['query']
                     len_query = len(query)
                     with key_value_store_lock and gemini_answers_lock:
-                        recent_query = "" if key_value_store[context_id] == "" else key_value_store[context_id][-1*len_query-1:-1]
-                        print(f"Compare queries {query} + {recent_query}")
-                        if len(key_value_store[context_id]) < len_query or (len(key_value_store[context_id]) > len_query and recent_query != query):
+                        if decide_count[bal[2]] == 2:
                             key_value_store[context_id] += f"QUERY: {query}\n"
                             ask_gemini(key_value_store[context_id], context_id, query_from)
                             print(f"You just added for context id  = {context_id} a query = {query} to key value store!!")
@@ -273,14 +273,14 @@ def handle_messages():
                             if not leader_queue.empty(): #THIS NEEDS TO BE FIXED ONCE THERE ARE MULTIPLE DECIDES
                                 leader_queue.get() #Remove from leader queue now that query is decided
                                 consensus_flag = True
+                    bal = message['ballot_num']
+                    decide_count[bal[2]] += 1
                     context_id = message['context_id']
                     LLM_answer = message['LLM_answer']
                     query_from = message['query_from']
                     len_LLM_answer = len(LLM_answer)
                     with key_value_store_lock:
-                        recent_answer = "" if len_LLM_answer > len(key_value_store[context_id]) else key_value_store[context_id][-1*len_LLM_answer-1:-1]
-                        print(f"Compare queries {LLM_answer} + {recent_answer}")
-                        if LLM_answer != recent_answer:
+                        if decide_count[bal[2]] == 2:
                             if len(LLM_answer) >= 7 and LLM_answer[:7] == "ANSWER:":
                                 key_value_store[context_id] += f"{LLM_answer}\n"
                             else:
@@ -293,9 +293,12 @@ def handle_messages():
                             if not leader_queue.empty(): #THIS NEEDS TO BE FIXED ONCE THERE ARE MULTIPLE DECIDES
                                 leader_queue.get() #Remove from leader queue now that query is decided
                                 consensus_flag = True
+                    bal = message['ballot_num']
+                    decide_count[bal[2]] += 1
                     context_id = message['context_id']
                     with key_value_store_lock:
-                        key_value_store[context_id] = ""
+                        if decide_count[bal[2]] == 2:
+                            key_value_store[context_id] = ""
                     print(f"You just created a key value store!! {context_id}")
                 elif message_type == "GEMINI":
                     context_id = message['context_id']
