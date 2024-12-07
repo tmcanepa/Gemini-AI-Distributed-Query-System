@@ -220,7 +220,7 @@ def handle_messages(): #handles receiving prepare,promise, and forwarded input f
                         print(f"Compare queries {LLM_answer} + {recent_answer}")
                         # print(f"Okay just look at kvs {key_value_store[context_id]}")
                         if LLM_answer != recent_answer:
-                                if len(LLM_answer) == 7 and LLM_answer[:7] == "ANSWER:":
+                                if len(LLM_answer) >= 7 and LLM_answer[:7] == "ANSWER:":
                                     key_value_store[context_id] += f"{LLM_answer}\n"
                                 else:
                                     key_value_store[context_id] += f"ANSWER: {LLM_answer}\n"
@@ -311,7 +311,7 @@ def create_query_choose_context(message, query_from, LLM_answer):
             if input1 not in key_value_store:
                 print(f"Could not choose from context id = {input1} because that context id has not been create yet!")
                 return
-            if input3 == client_id:
+            if query_from == client_id:
                 if (int(parts[2]) < 1 or int(parts[2]) > len(gemini_answers[parts[1]])):
                     print(f"Could not choose from context id = {input1} for answer = {parts[2]} because that is not a valid answer to choose from!")
                     return
