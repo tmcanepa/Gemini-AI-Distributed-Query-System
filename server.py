@@ -6,9 +6,12 @@ import ast
 import json
 
 clients = []
+sockets = {}
+id_sockets = {}
 running = True
 id_dct = {}
 fail_dct = {}
+fail_links = []
 def is_json(message):
     try:
         # Attempt to parse the string as JSON
@@ -38,14 +41,23 @@ def primary_handle_client(client_socket): #Everytime a client connects, it has i
                     if message.startswith("prepare") or message.startswith("propose_query") or message.startswith("propose_choose") or message.startswith("propose_create") or message.startswith("decide_query") or message.startswith("decide_choose") or message.startswith("decide_create"):
                         send_id1 = parts[-2]
                         send_id2 = parts[-3]
-                        if(fail_dct[id_dct[send_id1]] == True): #send prepare to both other clients
+
+                        print("Failed links", fail_links)
+                        print("Current socket", sockets[client_socket])
+
+                        if(fail_dct[id_dct[send_id1]] == True and (sockets[client_socket],send_id1) not in fail_links):
+                         #send prepare to both other clients
+                            print("Sending from", sockets[client_socket], "to", send_id1)
+
                             threading.Thread(target=server_to_client, args=(clients[(int(send_id1)-1)], message, "string"), daemon=True).start()
-                        if(fail_dct[id_dct[send_id2]] == True):
+                        if(fail_dct[id_dct[send_id2]] == True and (sockets[client_socket],send_id2) not in fail_links): #send prepare to both other clients
+                            print("Sending from", sockets[client_socket], "to", send_id1)
+
                             threading.Thread(target=server_to_client, args=(clients[(int(send_id2)-1)], message, "string"), daemon=True).start()
                     #This is for forwarding to 1 other server
                     elif message.startswith("promise") or message.startswith("accept") or message.startswith("query") or message.startswith("ack_leader_queued") or message.startswith("GEMINI"): #send back to proposer
                         forward = parts[1]
-                        if fail_dct[id_dct[forward]] == True:
+                        if fail_dct[id_dct[forward]] == True and (sockets[client_socket],forward) not in fail_links:
                             threading.Thread(target=server_to_client, args=(clients[(int(forward)-1)], message, "string"), daemon=True).start()
                 else: #Process it as json string
                     message_type = message['type']
@@ -53,7 +65,7 @@ def primary_handle_client(client_socket): #Everytime a client connects, it has i
                     if message_type == "forward_to_leader" or message_type == "ack_leader_queued":
                         forward = message["curr_leader"]
                         print(f"Forwarding message = {message} to leader = {forward}")
-                        if fail_dct[id_dct[str(forward)]] == True:
+                        if fail_dct[id_dct[str(forward)]] == True and (sockets[client_socket],str(forward)) not in fail_links:
                             threading.Thread(target=server_to_client, args=(clients[(int(forward)-1)], message, "json"), daemon=True).start()
         except ConnectionResetError as e:
             print(e)
@@ -66,6 +78,7 @@ def primary_handle_client(client_socket): #Everytime a client connects, it has i
 def server_to_client(client_socket, message, type): #handles send messages from server to clients
     time.sleep(3)
     if type == "string":
+
         try:
             client_socket.send(f"{message}\n".encode())  
             print(f"Forwarded {message}")
@@ -79,12 +92,62 @@ def server_to_client(client_socket, message, type): #handles send messages from 
             print(e)
     return
 
+def handle_fail_link(command): #handles fail link
+    global fail_links
+
+    message = command.split()
+    src = message[1]
+    dest = message[2]
+
+    fail_links.append((src,dest))
+    fail_links.append((dest,src))
+    print("Failed Link between", src, "and", dest)
+    return
+
+
+def handle_fix_link(command): #handles fail link
+    global fail_links
+
+    message = command.split()
+    src = message[1]
+    dest = message[2]
+
+    fail_links.pop((src, dest))
+    fail_links.pop((dest, src))
+    print("Fixed Link between", src, "and", dest)
+    return
+
+def handle_fail_node(command):
+    global fail_dct
+
+    message = command.split()
+    node = message[1]
+
+    fail_dct[node] = False #may need to check the dictionary id is correct
+
+    if node in id_sockets:
+        try:
+            id_sockets[node].close()
+            del id_sockets[node]  # Remove the socket from the dictionary
+        except Exception as e:
+            print(e)
+            pass
+    return
+
+
 def primary_input_thread(): #primary input thread
     global running
     while running:
         command = input()
+        print(f"Command = {command.lower()}")
         if command.lower() == "exit":
             handle_exit()
+        elif command.lower().startswith("faillink"):
+            handle_fail_link(command)
+        elif command.lower().startswith("fixlink"):
+            handle_fix_link(command)
+        elif command.lower().startswith("failNode"):
+            handle_fail_node(command)
 
 def handle_exit(): #handles exits
     global running
@@ -103,6 +166,8 @@ def handle_exit(): #handles exits
 def start_server(PORT): #Begins the input thread and accepts clients
     global server_socket 
     global running
+    global sockets
+    global id_socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(('127.0.0.1', int(PORT))) 
@@ -113,6 +178,10 @@ def start_server(PORT): #Begins the input thread and accepts clients
             client_socket, _ = server_socket.accept()
             clients.append(client_socket) #This only tracks order if clients are accepted as 1,2,3
             client_id, port_num = client_socket.recv(1024).decode().split()
+
+            sockets[client_socket] = client_id  #dictionary of sockets
+            id_sockets[client_id] = client_socket
+
             id_dct[client_id] = port_num
             fail_dct[port_num] = True
             client_socket.send("Success".encode()) 
