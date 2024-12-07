@@ -5,7 +5,7 @@ import time
 import ast
 import json
 
-clients = []
+clients = [None] * 3
 sockets = {}
 id_sockets = {}
 running = True
@@ -51,9 +51,13 @@ def primary_handle_client(client_socket): #Everytime a client connects, it has i
 
                             threading.Thread(target=server_to_client, args=(clients[(int(send_id1)-1)], message, "string"), daemon=True).start()
                         if(fail_dct[id_dct[send_id2]] == True and (sockets[client_socket],send_id2) not in fail_links): #send prepare to both other clients
-                            print("Sending from", sockets[client_socket], "to", send_id1)
+                            print("Sending from", sockets[client_socket], "to", send_id2)
 
                             threading.Thread(target=server_to_client, args=(clients[(int(send_id2)-1)], message, "string"), daemon=True).start()
+                        if(fail_dct[id_dct[sockets[client_socket]]] == True and (sockets[client_socket],sockets[client_socket]) not in fail_links): #send prepare to both other clients
+                            print("Sending from", sockets[client_socket], "to", sockets[client_socket])
+
+                            threading.Thread(target=server_to_client, args=(clients[(int(sockets[client_socket])-1)], message, "string"), daemon=True).start()
                     #This is for forwarding to 1 other server
                     elif message.startswith("promise") or message.startswith("accept") or message.startswith("query") or message.startswith("ack_leader_queued") or message.startswith("GEMINI"): #send back to proposer
                         forward = parts[1]
@@ -178,8 +182,10 @@ def start_server(PORT): #Begins the input thread and accepts clients
     while running:
         try:
             client_socket, _ = server_socket.accept()
-            clients.append(client_socket) #This only tracks order if clients are accepted as 1,2,3
             client_id, port_num = client_socket.recv(1024).decode().split()
+
+            clients[int(client_id) - 1] = client_socket #This only tracks order if clients are accepted as 1,2,3
+
 
             sockets[client_socket] = client_id  #dictionary of sockets
             id_sockets[client_id] = client_socket
