@@ -20,7 +20,7 @@ genai.configure(api_key=gemini_api)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 key_value_store = {}
-decide_count = {}
+decide_count = defaultdict(lambda: 0)
 leader_queue = queue.Queue()
 operation_queue = queue.Queue()
 running = True
@@ -169,7 +169,7 @@ def inherit_kvs(bal, proposer):
     return
 
 def handle_messages():
-    global curr_leader,timeout_flag_proposal,timeout_flag_query,leader_queue,operation_queue,consensus_flag
+    global curr_leader,timeout_flag_proposal,timeout_flag_query,leader_queue,operation_queue,consensus_flag, ballot_num, key_value_store, gemini_answers, decide_count
     buffer = ""
     while True:
         message = client_socket.recv(1024).decode()
@@ -206,7 +206,7 @@ def handle_messages():
                     query = message['query']
                     bal = message['ballot_num']
                     if bal >= ballot_num:
-                        print("NEEDS TO DO SOMETHING WITH INHERITING KEY VALUE STORE")
+                        print("NEED TO IMPLEMENT STORING THE QUERY IN CASE OF LEADER FAILURE")
                     ballot_num = bal
                     print("NEED TO IMPLEMENT STORING THE QUERY IN CASE OF LEADER FAILURE")
                     client_socket.send((json.dumps({
@@ -226,7 +226,7 @@ def handle_messages():
                     LLM_answer = message['LLM_answer']
                     bal = message['ballot_num']
                     if bal >= ballot_num:
-                        print("NEEDS TO DO SOMETHING WITH INHERITING KEY VALUE STORE")
+                        print("NEED TO IMPLEMENT STORING THE QUERY IN CASE OF LEADER FAILURE")
                     ballot_num = bal
                     print("NEED TO IMPLEMENT STORING THE QUERY IN CASE OF LEADER FAILURE")
                     client_socket.send((json.dumps({
@@ -251,13 +251,12 @@ def handle_messages():
                         "ballot_num": ballot_num
                     }) + '\n').encode())
                 elif message_type == "decide_query":
+                    bal = message['ballot_num']
+                    decide_count[bal[2]] = decide_count[bal[2]] + 1
                     with consensus_flag_lock:
-                        if curr_leader == client_id:
-                            if not leader_queue.empty(): #THIS NEEDS TO BE FIXED ONCE THERE ARE MULTIPLE DECIDES
+                        if curr_leader == client_id and decide_count[ballot_num[2]] == 2:
                                 leader_queue.get() #Remove from leader queue now that query is decided
                                 consensus_flag = True
-                    bal = message['ballot_num']
-                    decide_count[bal[2]] += 1
                     context_id = message['context_id']
                     query_from = message['query_from']
                     query = message['query']
@@ -268,13 +267,12 @@ def handle_messages():
                             ask_gemini(key_value_store[context_id], context_id, query_from)
                             print(f"You just added for context id  = {context_id} a query = {query} to key value store!!")
                 elif message_type == "decide_choose":
+                    bal = message['ballot_num']
+                    decide_count[bal[2]] = decide_count[bal[2]] + 1
                     with consensus_flag_lock:
-                        if curr_leader == client_id:
-                            if not leader_queue.empty(): #THIS NEEDS TO BE FIXED ONCE THERE ARE MULTIPLE DECIDES
+                        if curr_leader == client_id and decide_count[ballot_num[2]] == 2:
                                 leader_queue.get() #Remove from leader queue now that query is decided
                                 consensus_flag = True
-                    bal = message['ballot_num']
-                    decide_count[bal[2]] += 1
                     context_id = message['context_id']
                     LLM_answer = message['LLM_answer']
                     query_from = message['query_from']
@@ -288,13 +286,12 @@ def handle_messages():
                             gemini_answers[context_id] = []
                             print(f"You just added answer to key value store!! {LLM_answer}")
                 elif message_type == "decide_create":
+                    bal = message['ballot_num']
+                    decide_count[bal[2]] = decide_count[bal[2]] + 1
                     with consensus_flag_lock:
-                        if curr_leader == client_id:
-                            if not leader_queue.empty(): #THIS NEEDS TO BE FIXED ONCE THERE ARE MULTIPLE DECIDES
+                        if curr_leader == client_id and decide_count[ballot_num[2]] == 2:
                                 leader_queue.get() #Remove from leader queue now that query is decided
                                 consensus_flag = True
-                    bal = message['ballot_num']
-                    decide_count[bal[2]] += 1
                     context_id = message['context_id']
                     with key_value_store_lock:
                         if decide_count[bal[2]] == 2:
@@ -456,6 +453,7 @@ def consensus_operation(input1, input2, input3):
         LLM_answer = input2
         query_from = input3
         ballot_num[2] += 1
+        decide_count[ballot_num[2]] = 0
         client_socket.send((json.dumps({
             "type": "propose_choose",
             "context_id": context_id,
@@ -470,6 +468,7 @@ def consensus_operation(input1, input2, input3):
         context_id = input1
         query = input2
         ballot_num[2] += 1
+        decide_count[ballot_num[2]] = 0
         client_socket.send((json.dumps({
             "type": "propose_query",
             "context_id": context_id,

@@ -98,8 +98,8 @@ def handle_fail_link(command): # handles fail link
     global fail_links
 
     message = command.split()
-    src = message[1]
-    dest = message[2]
+    src = int(message[1])
+    dest = int(message[2])
 
     fail_links.append((src, dest))
     fail_links.append((dest, src))
@@ -110,8 +110,8 @@ def handle_fix_link(command): # handles fail link
     global fail_links
 
     message = command.split()
-    src = message[1]
-    dest = message[2]
+    src = int(message[1])
+    dest = int(message[2])
 
     fail_links.remove((src, dest))
     fail_links.remove((dest, src))
