@@ -62,11 +62,13 @@ def primary_handle_client(client_socket): #Everytime a client connects, it has i
                 else: #Process it as json string
                     message_type = message['type']
                     print(f"Found a json string with type {message_type}!!!")
-                    if message_type == "forward_to_leader" or message_type == "ack_leader_queued":
+                    if message_type == "forward_to_leader":
                         forward = message["curr_leader"]
-                        print(f"Forwarding message = {message} to leader = {forward}")
-                        if fail_dct[id_dct[str(forward)]] == True and (sockets[client_socket],str(forward)) not in fail_links:
-                            threading.Thread(target=server_to_client, args=(clients[(int(forward)-1)], message, "json"), daemon=True).start()
+                    if message_type == "ack_leader_queued":
+                        forward = message["query_from"]
+                    # print(f"Forwarding message = {message} to server = {forward}")
+                    if fail_dct[id_dct[str(forward)]] == True  and (sockets[client_socket],str(forward)) not in fail_links:
+                        threading.Thread(target=server_to_client, args=(clients[(int(forward)-1)], message, "json"), daemon=True).start()
         except ConnectionResetError as e:
             print(e)
             break

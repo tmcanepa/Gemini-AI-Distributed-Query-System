@@ -43,6 +43,8 @@ timeout_flag_proposal = True
 timeout_flag_query = True
 key_value_store_lock = threading.Lock()
 gemini_answers_lock = threading.Lock()
+queue_lock = threading.Lock()
+
 gemini_answers = defaultdict(list)
 #This is here for testing purposes
 
@@ -95,16 +97,27 @@ def promise(bal, proposer):
 def accept(promiser):
     client_socket.send(f"accept {promiser} {client_id}\n".encode())
 
-def delete_from_operation_queue(context_id, query, query_from): #Shit this should handle all of create, query, choose
+def delete_from_operation_queue(input1, input2, input3): #Shit this should handle all of create, query, choose
     global operation_queue
-    query_to_remove = (context_id, query, query_from)
+    print(f"Trying to delete from operation queue input1 = {input1} input2 = {input2} input3 =  {input3}")
+    query_to_remove = (input1, input2, input3)
     temp_list = list(operation_queue.queue)
+    print(f"temp_list  = {temp_list}")
     if query_to_remove in temp_list:
+        print(f"Just deleted {query_to_remove} from operation queue!")
         temp_list.remove(query_to_remove)
-    with operation_queue.mutex:
+    with queue_lock:
         operation_queue.queue.clear()
         for item in temp_list:
-            operation_queue.put(item)
+            print(f"tyring to add item = {item}")
+            if not isinstance(item, tuple) or len(item) != 3:
+                    print(f"Invalid item: {item}")
+                    continue
+            try:
+                operation_queue.put(item)
+                print(f"Queue contents: {list(operation_queue.queue)}")   
+            except Exception as e:
+                print(f"Failed to add item: {e}")
     return
 
 def ask_gemini(query, context_id, query_from):
@@ -177,8 +190,9 @@ def handle_messages(): #handles receiving prepare,promise, and forwarded input f
                 elif message.startswith('propose_choose'):
                     send_id1, send_id2 = get_other_server_ids()
                     context_id = parts[1]
-                    LLM_answer = " ".join(parts[2:-3])
-                    client_socket.send(f"decide_choose {context_id} {LLM_answer} {send_id1} {send_id2} {client_id}\n".encode())
+                    query_from = parts[2]
+                    LLM_answer = " ".join(parts[3:-3])
+                    client_socket.send(f"decide_choose {context_id} {query_from} {LLM_answer} {send_id1} {send_id2} {client_id}\n".encode())
                 elif message.startswith('propose_create'):
                     send_id1, send_id2 = get_other_server_ids()
                     context_id = parts[1]
@@ -198,7 +212,8 @@ def handle_messages(): #handles receiving prepare,promise, and forwarded input f
                                 print(f"You just added for context id  = {context_id} a query = {query} to key value store!!")
                 elif message.startswith('decide_choose'):
                     context_id = parts[1]
-                    LLM_answer = " ".join(parts[2:-3])
+                    LLM_answer = " ".join(parts[3:-3])
+                    query_from = parts[2]
                     len_LLM_answer = len(LLM_answer)
                     with key_value_store_lock:
                         recent_answer = "" if len_LLM_answer > len(key_value_store[context_id]) else key_value_store[context_id][-1*len_LLM_answer-1:-1]
@@ -230,17 +245,26 @@ def handle_messages(): #handles receiving prepare,promise, and forwarded input f
                     #received command from another server with fields "type, query_from, curr_leader, input_type,context_id, query, answer_num "
                     #message could be a query or create
                     message["type"] = "ack_leader_queued"
+                    query_from = message["query_from"]
+                    LLM_answer = message["query"]
                     client_socket.send((json.dumps(message) + '\n').encode()) 
                     operation = build_operation(message) #parse json to create operation
-                    threading.Thread(target=create_query_context, args=(operation,)).start()
+                    print(f"okay i built the operation {operation} ")
+                    threading.Thread(target=create_query_choose_context, args=(operation,query_from, LLM_answer)).start()
                 elif message_type == "ack_leader_queued":
                     #we are free to clear the operation from our queue as the leader received it
                     #It is in format type, query_from, curr_leader, input_type,context_id, query, answer_num
                     timeout_flag_query = False
+                    input_type = message['input_type']
                     query_from = message["query_from"]
                     context_id = message["context_id"]
-                    query = " ".join(message["query"])
-                    delete_from_operation_queue(context_id, query, query_from)
+                    query = message["query"] #don't need to use " ".join here because it was sent in correct format
+                    if input_type == "query":
+                        delete_from_operation_queue(context_id, query, query_from)
+                    if input_type == "create":
+                        delete_from_operation_queue("create", context_id, "create")
+                    if input_type == "choose":
+                        delete_from_operation_queue(context_id, query, query_from)
 
 
 def timed_out(type):
@@ -259,9 +283,9 @@ def timed_out(type):
     return
 
 
-def create_query_context(message):
+def create_query_choose_context(message, query_from, LLM_answer):
     global leader_queue, operation_queue
-    print(f"Trying to split message = {message}")
+    print(f"Trying to add to leader queue message = {message}")
     parts = message.split()
     input_type = parts[0]
     if input_type == "create":
@@ -271,27 +295,29 @@ def create_query_context(message):
     elif input_type == "query":
         input1 = parts[1] #context id
         input2 = " ".join(parts[2:]) #query string
-        input3 = client_id #where query originated
+        input3 = query_from #where query originated
         with key_value_store_lock:
             if input1 not in key_value_store:
                 print(f"Could not process query = {input2} for context id = {input1} because that context id has not been created yet!")
                 return
-        with gemini_answers_lock:
+        with gemini_answers_lock: 
             if len(gemini_answers[input1]) > 0:
                 print(f"Sorry we can not process another query for context id = {input1} until an answer has been chosen for the previous query!")
                 return
     elif input_type == "choose":
         input1 = parts[1] #context id
+        input3 = "choose"
         with key_value_store_lock and gemini_answers_lock:
             if input1 not in key_value_store:
                 print(f"Could not choose from context id = {input1} because that context id has not been create yet!")
                 return
-            if int(parts[2]) < 1 or int(parts[2]) > len(gemini_answers[parts[1]]):
-                print(f"Could not choose from context id = {input1} for answer = {parts[2]} because that is not a valid answer to choose from!")
-                return
-            input2 = gemini_answers[parts[1]][int(parts[2])-1] #LLM Answer
-            input3 = "choose" #dummy variable
-        
+            if input3 == client_id:
+                if (int(parts[2]) < 1 or int(parts[2]) > len(gemini_answers[parts[1]])):
+                    print(f"Could not choose from context id = {input1} for answer = {parts[2]} because that is not a valid answer to choose from!")
+                    return
+                input2 = gemini_answers[parts[1]][int(parts[2])-1] #LLM Answer
+            else:
+                input2 = LLM_answer
     if curr_leader == 0:
         operation_queue.put((input1, input2, input3))
         propose()
@@ -299,6 +325,7 @@ def create_query_context(message):
         leader_queue.put((input1, input2, input3))
         print(f"just added to leader queue ({input1} {input2} {input3})")
     else:
+
         operation_queue.put((input1, input2, input3))
         send_to_leader(message) 
         threading.Timer(10, timed_out, args = ("operation",)).start()
@@ -306,6 +333,7 @@ def create_query_context(message):
 
 
 def send_to_leader(message):
+    parts = message.split()
     if curr_leader != 0:
         # client_socket.send(f"forward_to_leader {curr_leader} {message}\n".encode())
         parts = message.split()
@@ -314,8 +342,24 @@ def send_to_leader(message):
         answer_num = 0
         if parts[0] == "query":
             query = " ".join(parts[2:])
+            # with key_value_store_lock:
+            #     if context_id not in key_value_store:
+            #         print(f"Could not process query = {query} for context id = {context_id} because that context id has not been created yet!")
+            #         return
+            # with gemini_answers_lock: 
+            #     if len(gemini_answers[context_id]) > 0:
+            #         print(f"Sorry we can not process another query for context id = {context_id} until an answer has been chosen for the previous query!")
+            #         return
         elif parts[0] == "choose":
             answer_num = parts[2]
+            # with key_value_store_lock and gemini_answers_lock:
+            #     if context_id not in key_value_store:
+            #         print(f"Could not choose from context id = {context_id} because that context id has not been created yet!")
+            #         return
+            #     if (int(answer_num) < 1 or int(answer_num) > len(gemini_answers[context_id])):
+            #         print(f"Could not choose from context id = {context_id} for answer = {answer_num} because that is not a valid answer to choose from!")
+            #         return
+            query = gemini_answers[context_id][int(answer_num)-1]
         client_socket.send((json.dumps({
             "type" :  "forward_to_leader",
             "query_from" : client_id,
@@ -339,35 +383,15 @@ def consensus_operation(input1, input2, input3):
     print(f"Starting consensus op on {input1} {input2}")
     if input3 == "create":
         context_id = input2
-        # client_socket.send({
-        #     "type" : "propose_create",
-        #     "context_id" : context_id,
-        #     "send_id1" : send_id1,
-        #     "send_id2" : send_id2,
-        #     "client_id" : client_id}.encode())
         client_socket.send(f"propose_create {context_id} {send_id1} {send_id2} {client_id}\n".encode())
     elif input3 == "choose":
         context_id = input1
         LLM_answer = input2
-        # client_socket.send({
-        #     "type" : "propose_choose",
-        #     "context_id" : context_id,
-        #     "LLM_answer" : LLM_answer,
-        #     "send_id1" : send_id1,
-        #     "send_id2" : send_id2,
-        #     "client_id" : client_id}.encode())
-        client_socket.send(f"propose_choose {context_id} {LLM_answer} {send_id1} {send_id2} {client_id}\n".encode())
+        query_from  = input3
+        client_socket.send(f"propose_choose {context_id} {query_from} {LLM_answer} {send_id1} {send_id2} {client_id}\n".encode())
     else: #query's input3 is a client id
         context_id = input1
         query = input2
-        # client_socket.send({
-        #     "type" : "propose_query",
-        #     "context_id" : context_id,
-        #     "input3" : input3,
-        #     "query" : query,
-        #     "send_id1" : send_id1,
-        #     "send_id2" : send_id2,
-        #     "client_id" : client_id}.encode())
         client_socket.send(f"propose_query {context_id} {input3} {query} {send_id1} {send_id2} {client_id}\n".encode())
         
     return
@@ -410,7 +434,7 @@ if __name__ == "__main__":
         message = input()
         if valid_input(message):
             if message.startswith('create') or message.startswith('query') or message.startswith('choose'): #create <context id>, query <context id> <query string>
-                threading.Thread(target=create_query_context, args=(message,)).start()
+                threading.Thread(target=create_query_choose_context, args=(message, client_id, "Null")).start()
             elif message.startswith('view '):
                 view_context(message)
             elif message == "viewall":
