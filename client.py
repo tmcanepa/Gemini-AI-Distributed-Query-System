@@ -26,7 +26,7 @@ running = True
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client_id = 0
 curr_leader = 0
-ballot_num = [0, 0]
+ballot_num = [0, 0, 0]
 timeout_flag_proposal = True
 timeout_flag_query = True
 consensus_flag = True
@@ -99,7 +99,8 @@ def accept(promiser):
     client_socket.send((json.dumps({
         "type": "accept",
         "promiser": promiser,
-        "client_id": client_id
+        "client_id": client_id,
+        "ballot_num": ballot_num
     })+'\n').encode())
 
 def delete_from_operation_queue(input1, input2, input3):
@@ -152,6 +153,20 @@ def build_operation(message) -> str:
     else:
         print(f"You should not be building right now with {message['type']}")
         return ""
+    
+def inherit_kvs(bal, proposer):
+    global key_value_store
+    print("Trying to inherit updated key value store")
+    send_id1, send_id2 = get_other_server_ids()
+    client_socket.send((json.dumps({
+        "type": "inherit_kvs",
+        "ballot_num": bal,
+        "proposer": proposer,
+        "send_id1": send_id1,
+        "send_id2": send_id2,
+        "client_id": client_id
+    })+'\n').encode())
+    return
 
 def handle_messages():
     global curr_leader,timeout_flag_proposal,timeout_flag_query,leader_queue,operation_queue,consensus_flag
@@ -171,6 +186,8 @@ def handle_messages():
                     proposer = message['proposer']
                     print("Ballots: ", bal, ballot_num)
                     if bal >= ballot_num:
+                        if bal[2] > ballot_num:
+                            inherit_kvs(bal, proposer)
                         promise(bal, proposer)
                 elif message_type == "promise":
                     timeout_flag_proposal = False
@@ -187,6 +204,11 @@ def handle_messages():
                     context_id = message['context_id']
                     query_from = message['query_from']
                     query = message['query']
+                    bal = message['ballot_num']
+                    if bal >= ballot_num:
+                        print("NEEDS TO DO SOMETHING WITH INHERITING KEY VALUE STORE")
+                    ballot_num = bal
+                    print("NEED TO IMPLEMENT STORING THE QUERY IN CASE OF LEADER FAILURE")
                     client_socket.send((json.dumps({
                         "type": "decide_query",
                         "context_id": context_id,
@@ -194,13 +216,19 @@ def handle_messages():
                         "query": query,
                         "send_id1": send_id1,
                         "send_id2": send_id2,
-                        "client_id": client_id
+                        "client_id": client_id,
+                        "ballot_num": ballot_num
                     }) + '\n').encode())
                 elif message_type == "propose_choose":
                     send_id1, send_id2 = get_other_server_ids()
                     context_id = message['context_id']
                     query_from = message['query_from']
                     LLM_answer = message['LLM_answer']
+                    bal = message['ballot_num']
+                    if bal >= ballot_num:
+                        print("NEEDS TO DO SOMETHING WITH INHERITING KEY VALUE STORE")
+                    ballot_num = bal
+                    print("NEED TO IMPLEMENT STORING THE QUERY IN CASE OF LEADER FAILURE")
                     client_socket.send((json.dumps({
                         "type": "decide_choose",
                         "context_id": context_id,
@@ -208,7 +236,8 @@ def handle_messages():
                         "LLM_answer": LLM_answer,
                         "send_id1": send_id1,
                         "send_id2": send_id2,
-                        "client_id": client_id
+                        "client_id": client_id,
+                        "ballot_num": ballot_num
                     }) + '\n').encode())
                 elif message_type == "propose_create":
                     send_id1, send_id2 = get_other_server_ids()
@@ -218,7 +247,8 @@ def handle_messages():
                         "context_id": context_id,
                         "send_id1": send_id1,
                         "send_id2": send_id2,
-                        "client_id": client_id
+                        "client_id": client_id,
+                        "ballot_num": ballot_num
                     }) + '\n').encode())
                 elif message_type == "decide_query":
                     with consensus_flag_lock:
@@ -293,6 +323,18 @@ def handle_messages():
                         delete_from_operation_queue("create", context_id, "create")
                     if input_type == "choose":
                         delete_from_operation_queue(context_id, query, query_from)
+                elif message_type == "inherit_kvs":
+                    proposer = message['proposer']
+                    client_socket.send((json.dumps({
+                        "type": "ack_inherit_kvs",
+                        "proposer": proposer,
+                        "client_id": client_id,
+                        "ballot_num": ballot_num,
+                        "kvs": key_value_store
+                    })+'\n').encode())
+                elif message_type == "ack_inherit_kvs":
+                    key_value_store = message['kvs']
+                    print(f"Updated key value store {key_value_store}")
             else:
                 print(f"Received non-JSON message: {message}")
                 handle_exit()
@@ -380,7 +422,8 @@ def send_to_leader(message):
             "input_type": parts[0],
             "context_id": context_id,
             "query": query,
-            "answer_num": answer_num
+            "answer_num": answer_num,
+            "ballot_num": ballot_num
         }) + '\n').encode())
 
 def view_context(message):
@@ -402,12 +445,14 @@ def consensus_operation(input1, input2, input3):
             "context_id": context_id,
             "send_id1": send_id1,
             "send_id2": send_id2,
-            "client_id": client_id
+            "client_id": client_id,
+            "ballot_num": ballot_num
         })+'\n').encode())
     elif input3 == "choose":
         context_id = input1
         LLM_answer = input2
         query_from = input3
+        ballot_num[2] += 1
         client_socket.send((json.dumps({
             "type": "propose_choose",
             "context_id": context_id,
@@ -415,11 +460,13 @@ def consensus_operation(input1, input2, input3):
             "LLM_answer": LLM_answer,
             "send_id1": send_id1,
             "send_id2": send_id2,
-            "client_id": client_id
+            "client_id": client_id,
+            "ballot_num": ballot_num
         })+'\n').encode())
     else:
         context_id = input1
         query = input2
+        ballot_num[2] += 1
         client_socket.send((json.dumps({
             "type": "propose_query",
             "context_id": context_id,
@@ -427,7 +474,8 @@ def consensus_operation(input1, input2, input3):
             "query": query,
             "send_id1": send_id1,
             "send_id2": send_id2,
-            "client_id": client_id
+            "client_id": client_id,
+            "ballot_num": ballot_num
         })+'\n').encode())
     return
 
