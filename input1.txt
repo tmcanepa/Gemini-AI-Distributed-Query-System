@@ -35,11 +35,18 @@ create 3
 query 3 name a number.
 choose 1 1
 #Test operation queue is properly being queued
-failNode 1
+coordinator - failNode 1
 create 2
 create 3 
 create 4
 viewall
+
+#Coordinator
+#error checking bad input
+this is a bad input
+#failing an invalid node
+failNode 4
+failNode -1
 
 
 

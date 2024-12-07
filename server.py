@@ -25,6 +25,9 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
     while running:
         try:
             message = client_socket.recv(1024).decode()
+            if not message:
+                print("Socket has been shutdown. Exiting.")
+                break
             buffer += message
             while '\n' in buffer:
                 message, buffer = buffer.split('\n', 1)
@@ -38,10 +41,10 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
                         send_id2 = message['send_id2']
                         print("Failed links", fail_links)
                         print("Current socket", sockets[client_socket])
-                        if fail_dct[send_id1] and (sockets[client_socket], send_id1) not in fail_links:
+                        if send_id1 in fail_dct and fail_dct[send_id1] and (sockets[client_socket], send_id1) not in fail_links:
                             print("Sending from", sockets[client_socket], "to", send_id1)
                             threading.Thread(target=server_to_client, args=(clients[int(send_id1) - 1], message), daemon=True).start()
-                        if fail_dct[send_id2] and (sockets[client_socket], send_id2) not in fail_links:
+                        if send_id2 in fail_dct and fail_dct[send_id2] and (sockets[client_socket], send_id2) not in fail_links:
                             print("Sending from", sockets[client_socket], "to", send_id2)
                             threading.Thread(target=server_to_client, args=(clients[int(send_id2) - 1], message), daemon=True).start()
                         if fail_dct[sockets[client_socket]] and (sockets[client_socket], sockets[client_socket]) not in fail_links:
@@ -57,15 +60,15 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
                         else:
                             forward = message['client_id']
                         print("Forwardng", message_type, "to", forward)
-                        if fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
+                        if forward in fail_dct and fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
                             threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
                     elif message_type == "forward_to_leader":
                         forward = message["curr_leader"]
-                        if fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
+                        if forward in fail_dct and fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
                             threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
                     elif message_type == "ack_leader_queued":
                         forward = message["query_from"]
-                        if fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
+                        if forward in fail_dct and fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
                             threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
                 else:
                     print(f"Received non-JSON message: {message}")
@@ -116,18 +119,16 @@ def handle_fail_node(command):
     parts = command.split()
     node = int(parts[1])
 
-    fail_dct[node] = False #This is going to 
+    fail_dct[node] = False 
     print(f"We just failed node = {node}, fail_dct = {fail_dct}")
 
-    if node in id_sockets:
+    if node in id_sockets and id_sockets[node]:
         try:
+            id_sockets[node].shutdown(socket.SHUT_RDWR)
             id_sockets[node].close()
-            del id_sockets[node]  # Remove the socket from the dictionary
-            print(f"We just deleted node = {node}, id_sockets length = {len(id_sockets)}") 
-
         except Exception as e:
-            print(e)
-            pass
+            print(f"Error closing socket for node {node}: {e}")
+        del id_sockets[node]
     return
 
 def primary_input_thread(): # primary input thread
@@ -143,6 +144,12 @@ def primary_input_thread(): # primary input thread
             handle_fix_link(command)
         elif command.lower().startswith("failnode"):
             handle_fail_node(command)
+        else:
+            print(f"{command} is not a valid input...")
+            print("1. failLink <src> <dst>")
+            print("2. fixLink <src> <dst>>")
+            print("3. failNode <nodeNum>")
+            print("4. exit")
 
 def handle_exit(): # handles exits
     global running
@@ -158,10 +165,8 @@ def handle_exit(): # handles exits
     sys.exit(0)
 
 def start_server(PORT): # Begins the input thread and accepts clients
-    global server_socket
-    global running
-    global sockets
-    global id_sockets
+    global server_socket,running,sockets,id_sockets
+
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(('127.0.0.1', int(PORT)))
@@ -176,7 +181,7 @@ def start_server(PORT): # Begins the input thread and accepts clients
             # port_num = response_json["port_num"]
 
 
-            clients[int(client_id) - 1] = client_socket # This only tracks order if clients are accepted as 1,2,3
+            clients[client_id - 1] = client_socket # This only tracks order if clients are accepted as 1,2,3
             sockets[client_socket] = client_id  # dictionary of sockets
             id_sockets[client_id] = client_socket
             fail_dct[client_id] = True

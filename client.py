@@ -46,7 +46,7 @@ def testing_purposes(test):
 def handle_exit():
     client_socket.close()
     sys.stdout.flush()
-    sys.exit(0)
+    os._exit(0)
 
 def start_client():
     global client_socket
@@ -70,6 +70,7 @@ def get_other_server_ids():
         send_id1 = 3
     if send_id2 == 0:
         send_id2 = 3
+    print(f"Found other ids {send_id1} and {send_id2}")
     return send_id1, send_id2
 
 def propose():
@@ -158,6 +159,9 @@ def handle_messages():
     buffer = ""
     while True:
         message = client_socket.recv(1024).decode()
+        if not message:
+            print("Socket has been shutdown. Exiting.")
+            handle_exit()
         buffer += message
         while '\n' in buffer:
             message, buffer = buffer.split('\n', 1)
