@@ -38,31 +38,35 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
                         send_id2 = message['send_id2']
                         print("Failed links", fail_links)
                         print("Current socket", sockets[client_socket])
-                        if fail_dct[id_dct[send_id1]] and (sockets[client_socket], send_id1) not in fail_links:
+                        if fail_dct[send_id1] and (sockets[client_socket], send_id1) not in fail_links:
                             print("Sending from", sockets[client_socket], "to", send_id1)
-                            threading.Thread(target=server_to_client, args=(clients[int(send_id1) - 1], message, "json"), daemon=True).start()
-                        if fail_dct[id_dct[send_id2]] and (sockets[client_socket], send_id2) not in fail_links:
+                            threading.Thread(target=server_to_client, args=(clients[int(send_id1) - 1], message), daemon=True).start()
+                        if fail_dct[send_id2] and (sockets[client_socket], send_id2) not in fail_links:
                             print("Sending from", sockets[client_socket], "to", send_id2)
-                            threading.Thread(target=server_to_client, args=(clients[int(send_id2) - 1], message, "json"), daemon=True).start()
-                        # if fail_dct[id_dct[sockets[client_socket]]] and (sockets[client_socket], sockets[client_socket]) not in fail_links:
-                        #     print("Sending from", sockets[client_socket], "to", sockets[client_socket])
-                        #     threading.Thread(target=server_to_client, args=(clients[int(sockets[client_socket]) - 1], message, "json"), daemon=True).start()
+                            threading.Thread(target=server_to_client, args=(clients[int(send_id2) - 1], message), daemon=True).start()
+                        if fail_dct[sockets[client_socket]] and (sockets[client_socket], sockets[client_socket]) not in fail_links:
+                            print("Sending from", sockets[client_socket], "to", sockets[client_socket])
+                            threading.Thread(target=server_to_client, args=(clients[int(sockets[client_socket]) - 1], message), daemon=True).start()
                     elif message_type in ["promise", "accept", "query", "ack_leader_queued", "GEMINI"]:
                         if message_type in ["GEMINI", "ack_leader_queued"]:
                             forward = message['query_from']
+                        elif message_type == "promise":
+                            forward = message["proposer"]
+                        elif message_type == "accept":
+                            forward = message["promiser"]
                         else:
                             forward = message['client_id']
                         print("Forwardng", message_type, "to", forward)
-                        if fail_dct[id_dct[forward]] and (sockets[client_socket], forward) not in fail_links:
-                            threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message, "json"), daemon=True).start()
+                        if fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
+                            threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
                     elif message_type == "forward_to_leader":
                         forward = message["curr_leader"]
-                        if fail_dct[id_dct[forward]] and (sockets[client_socket], forward) not in fail_links:
-                            threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message, "json"), daemon=True).start()
+                        if fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
+                            threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
                     elif message_type == "ack_leader_queued":
                         forward = message["query_from"]
-                        if fail_dct[id_dct[forward]] and (sockets[client_socket], forward) not in fail_links:
-                            threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message, "json"), daemon=True).start()
+                        if fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
+                            threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
                 else:
                     print(f"Received non-JSON message: {message}")
         except ConnectionResetError as e:
@@ -73,7 +77,7 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
             break
     client_socket.close()
 
-def server_to_client(client_socket, message, type): # handles send messages from server to clients
+def server_to_client(client_socket, message): # handles send messages from server to clients
     time.sleep(3)
     try:
         client_socket.send((json.dumps(message) + '\n').encode())
@@ -109,15 +113,18 @@ def handle_fix_link(command): # handles fail link
 def handle_fail_node(command):
     global fail_dct
 
-    message = command.split()
-    node = message[1]
+    parts = command.split()
+    node = int(parts[1])
 
-    fail_dct[node] = False # may need to check the dictionary id is correct
+    fail_dct[node] = False #This is going to 
+    print(f"We just failed node = {node}, fail_dct = {fail_dct}")
 
     if node in id_sockets:
         try:
             id_sockets[node].close()
             del id_sockets[node]  # Remove the socket from the dictionary
+            print(f"We just deleted node = {node}, id_sockets length = {len(id_sockets)}") 
+
         except Exception as e:
             print(e)
             pass
@@ -166,22 +173,20 @@ def start_server(PORT): # Begins the input thread and accepts clients
             response = client_socket.recv(1024).decode()
             _ , response_json = is_json(response)
             client_id = response_json["client_id"]
-            port_num = response_json["port_num"]
+            # port_num = response_json["port_num"]
 
 
             clients[int(client_id) - 1] = client_socket # This only tracks order if clients are accepted as 1,2,3
             sockets[client_socket] = client_id  # dictionary of sockets
             id_sockets[client_id] = client_socket
-
-
-            id_dct[client_id] = port_num
-            fail_dct[port_num] = True
+            fail_dct[client_id] = True
 
             client_socket.send((json.dumps({"type": "Success"}) + '\n').encode())
 
             client_handler = threading.Thread(target=primary_handle_client, args=(client_socket,), daemon=True) # handles incoming clients
             client_handler.start()
-            print(id_dct)
+            print(fail_dct)
+            print(f"length of id sockets = {len(id_sockets)}")
         except Exception as e:
             print(e)
             pass

@@ -1,0 +1,45 @@
+#Server1 is leader
+#Typos
+this is a bad input
+#Basic Paxos tested on leader/ timeout
+create 1
+query 1 What is 1 + 1?
+choose 1 1
+create 3
+query 3 name a number.
+choose 1 1
+#querying twice without choosing
+query 1 What is 2 + 2?
+query 1 What is 3 + 3?
+#choose for nonexistent context id
+choose 2 1
+#choose answer outside of range
+choose 1 -1
+choose 1 5
+#Make sure recreating contextid does not clear it
+create 1
+viewall
+#query a nonexistent contextid
+query 3 name an animal.
+#Node that receives a forwarded message should forward to real leader <--- How would this happen?
+
+
+
+#Server2 is not leader
+#make sure all forwarding and error checks work 
+this is a bad input
+create 1
+query 1 What is 1 + 1?
+choose 1 1
+create 3
+query 3 name a number.
+choose 1 1
+#Test operation queue is properly being queued
+failNode 1
+create 2
+create 3 
+create 4
+viewall
+
+
+

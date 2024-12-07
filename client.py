@@ -29,8 +29,10 @@ curr_leader = 0
 ballot_num = [0, 0]
 timeout_flag_proposal = True
 timeout_flag_query = True
+consensus_flag = True
 key_value_store_lock = threading.Lock()
 gemini_answers_lock = threading.Lock()
+consensus_flag_lock = threading.Lock()
 queue_lock = threading.Lock()
 
 gemini_answers = defaultdict(list)
@@ -80,7 +82,7 @@ def propose():
         "ballot_num": ballot_num,
         "send_id1": send_id1,
         "send_id2": send_id2,
-        "client_id": client_id
+        "proposer": client_id
     })+'\n').encode())
     threading.Timer(10, timed_out, args=("proposal",)).start()
     return
@@ -90,7 +92,7 @@ def promise(bal, proposer):
         "type": "promise",
         "proposer": proposer,
         "ballot_num": bal,
-        "client_id": client_id
+        "promiser": client_id
     })+'\n').encode())
 
 def accept(promiser):
@@ -152,11 +154,7 @@ def build_operation(message) -> str:
         return ""
 
 def handle_messages():
-    global curr_leader
-    global timeout_flag_proposal
-    global timeout_flag_query
-    global leader_queue
-    global operation_queue
+    global curr_leader,timeout_flag_proposal,timeout_flag_query,leader_queue,operation_queue,consensus_flag
     buffer = ""
     while True:
         message = client_socket.recv(1024).decode()
@@ -167,7 +165,7 @@ def handle_messages():
             print(f"Received {message}")
             if bool_json:
                 message_type = message['type']
-                print(f"Received a JSON message with type {message_type}!!!")
+                # print(f"Received a JSON message with type {message_type}!!!")
                 if message_type == "prepare":
                     bal = message['ballot_num']
                     proposer = message['proposer']
@@ -223,6 +221,11 @@ def handle_messages():
                         "client_id": client_id
                     }) + '\n').encode())
                 elif message_type == "decide_query":
+                    with consensus_flag_lock:
+                        if curr_leader == client_id:
+                            if not leader_queue.empty(): #THIS NEEDS TO BE FIXED ONCE THERE ARE MULTIPLE DECIDES
+                                leader_queue.get() #Remove from leader queue now that query is decided
+                                consensus_flag = True
                     context_id = message['context_id']
                     query_from = message['query_from']
                     query = message['query']
@@ -235,6 +238,11 @@ def handle_messages():
                             ask_gemini(key_value_store[context_id], context_id, query_from)
                             print(f"You just added for context id  = {context_id} a query = {query} to key value store!!")
                 elif message_type == "decide_choose":
+                    with consensus_flag_lock:
+                        if curr_leader == client_id:
+                            if not leader_queue.empty(): #THIS NEEDS TO BE FIXED ONCE THERE ARE MULTIPLE DECIDES
+                                leader_queue.get() #Remove from leader queue now that query is decided
+                                consensus_flag = True
                     context_id = message['context_id']
                     LLM_answer = message['LLM_answer']
                     query_from = message['query_from']
@@ -250,6 +258,11 @@ def handle_messages():
                             gemini_answers[context_id] = []
                             print(f"You just added answer to key value store!! {LLM_answer}")
                 elif message_type == "decide_create":
+                    with consensus_flag_lock:
+                        if curr_leader == client_id:
+                            if not leader_queue.empty(): #THIS NEEDS TO BE FIXED ONCE THERE ARE MULTIPLE DECIDES
+                                leader_queue.get() #Remove from leader queue now that query is decided
+                                consensus_flag = True
                     context_id = message['context_id']
                     with key_value_store_lock:
                         key_value_store[context_id] = ""
@@ -285,8 +298,7 @@ def handle_messages():
                 handle_exit()
 
 def timed_out(type):
-    global timeout_flag_query
-    global timeout_flag_proposal
+    global timeout_flag_query, timeout_flag_proposal
     if type == "operation":
         if timeout_flag_query:
             print("Socket for query Timed Out")
@@ -308,6 +320,9 @@ def create_query_choose_context(message, query_from, LLM_answer):
         input1 = "create"
         input2 = parts[1]
         input3 = "create"
+        if input2 in key_value_store:
+            print(f"Context id = {input2} has already been created")
+            return
     elif input_type == "query":
         input1 = parts[1]
         input2 = " ".join(parts[2:])
@@ -334,6 +349,7 @@ def create_query_choose_context(message, query_from, LLM_answer):
                 input2 = gemini_answers[parts[1]][int(parts[2])-1]
             else:
                 input2 = LLM_answer
+    
     if curr_leader == 0:
         operation_queue.put((input1, input2, input3))
         propose()
@@ -416,12 +432,14 @@ def consensus_operation(input1, input2, input3):
     return
 
 def leader_queue_thread():
-    global curr_leader, leader_queue, operation_queue
+    global curr_leader, leader_queue, operation_queue, consensus_flag
     while True:
-        if curr_leader == client_id and not leader_queue.empty():
-            print("Handling a leader query")
-            input1, input2, input3 = leader_queue.get()
-            consensus_operation(input1, input2, input3)
+        with consensus_flag_lock:
+            if curr_leader == client_id and not leader_queue.empty() and consensus_flag:
+                print("Handling a leader operation")
+                consensus_flag = False
+                input1, input2, input3 = leader_queue.queue[0]
+                consensus_operation(input1, input2, input3)
 
 def valid_input(message):
     parts = message.split()
