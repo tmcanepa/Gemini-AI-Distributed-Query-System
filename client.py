@@ -240,6 +240,9 @@ def handle_messages():
                         "ballot_num": ballot_num
                     }) + '\n').encode())
                 elif message_type == "propose_create":
+                    bal = message['ballot_num']
+                    if bal[2] == ballot_num[2] + 1:
+                        ballot_num = bal
                     send_id1, send_id2 = get_other_server_ids()
                     context_id = message['context_id']
                     client_socket.send((json.dumps({
@@ -296,7 +299,7 @@ def handle_messages():
                     with key_value_store_lock:
                         if decide_count[bal[2]] == 2:
                             key_value_store[context_id] = ""
-                    print(f"You just created a key value store!! {context_id}")
+                            print(f"You just created a key value store!! {context_id}")
                 elif message_type == "GEMINI":
                     context_id = message['context_id']
                     response = message['response']
@@ -440,6 +443,7 @@ def consensus_operation(input1, input2, input3):
     print(f"Starting consensus op on {input1} {input2}")
     if input3 == "create":
         context_id = input2
+        ballot_num[2] += 1
         client_socket.send((json.dumps({
             "type": "propose_create",
             "context_id": context_id,
