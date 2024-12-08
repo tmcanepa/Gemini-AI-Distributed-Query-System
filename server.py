@@ -31,24 +31,24 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
             buffer += message
             while '\n' in buffer:
                 message, buffer = buffer.split('\n', 1)
-                print(f"received {message}")
+                # print(f"received {message}")
                 bool_json, message = is_json(message)
                 if bool_json:
                     message_type = message['type']
-                    print(f"Found a json string with type {message_type}!!!")
+                    # print(f"Found a json string with type {message_type}!!!")
                     if message_type in ["prepare", "propose_query", "propose_choose", "propose_create", "decide_query", "decide_choose", "decide_create", "inherit_kvs"]:
                         send_id1 = message['send_id1']
                         send_id2 = message['send_id2']
-                        print("Failed links", fail_links)
-                        print("Current socket", sockets[client_socket])
+                        # print("Failed links", fail_links)
+                        # print("Current socket", sockets[client_socket])
                         if send_id1 in fail_dct and fail_dct[send_id1] and (sockets[client_socket], send_id1) not in fail_links:
-                            print("Sending from", sockets[client_socket], "to", send_id1)
+                            # print("Sending from", sockets[client_socket], "to", send_id1)
                             threading.Thread(target=server_to_client, args=(clients[int(send_id1) - 1], message), daemon=True).start()
                         if send_id2 in fail_dct and fail_dct[send_id2] and (sockets[client_socket], send_id2) not in fail_links:
-                            print("Sending from", sockets[client_socket], "to", send_id2)
+                            # print("Sending from", sockets[client_socket], "to", send_id2)
                             threading.Thread(target=server_to_client, args=(clients[int(send_id2) - 1], message), daemon=True).start()
                         if fail_dct[sockets[client_socket]] and (sockets[client_socket], sockets[client_socket]) not in fail_links and message_type not in ["prepare","inherit_kvs"]:
-                            print("Sending from", sockets[client_socket], "to", sockets[client_socket])
+                            # print("Sending from", sockets[client_socket], "to", sockets[client_socket])
                             threading.Thread(target=server_to_client, args=(clients[int(sockets[client_socket]) - 1], message), daemon=True).start()
                     elif message_type in ["promise", "accept", "query", "ack_leader_queued", "GEMINI"]:
                         if message_type in ["GEMINI", "ack_leader_queued"]:
@@ -59,7 +59,7 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
                             forward = message["promiser"]
                         else:
                             forward = message['client_id']
-                        print("Forwardng", message_type, "to", forward)
+                        # print("Forwardng", message_type, "to", forward)
                         if forward in fail_dct and fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
                             threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
                     elif message_type == "forward_to_leader":
@@ -88,7 +88,7 @@ def server_to_client(client_socket, message): # handles send messages from serve
     time.sleep(3)
     try:
         client_socket.send((json.dumps(message) + '\n').encode())
-        print(f"Forwarded {message}")
+        # print(f"Forwarded {message}")
     except Exception as e:
         print(e)
     return
@@ -194,8 +194,8 @@ def start_server(PORT): # Begins the input thread and accepts clients
 
             client_handler = threading.Thread(target=primary_handle_client, args=(client_socket,), daemon=True) # handles incoming clients
             client_handler.start()
-            print(fail_dct)
-            print(f"length of id sockets = {len(id_sockets)}")
+            # print(fail_dct)
+            # print(f"length of id sockets = {len(id_sockets)}")
         except Exception as e:
             print(e)
             pass
