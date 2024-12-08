@@ -196,11 +196,15 @@ def handle_messages():
                         promise(bal, proposer)
                 elif message_type == "promise":
                     timeout_flag_proposal = False
-                    curr_leader = client_id
-                    leader_queue = operation_queue
+                    curr_leader = ballot_num[1]
+                    if curr_leader == client_id:
+                        leader_queue = operation_queue
+                    else:
+                        operation_queue.queue.clear()
                     promiser = message['promiser']
                     with print_lock:
                         print(f"Received PROMISE {ballot_num} from Server {promiser}")
+
                     accept(promiser)
                 elif message_type == "accept":
                     bal = message['ballot_num']
@@ -369,39 +373,6 @@ def handle_messages():
                         delete_from_operation_queue("create", context_id, "create")
                     if input_type == "choose":
                         delete_from_operation_queue(context_id, query, client_id_local)
-                # elif message_type == "inherit_kvs":
-                #     client_id_local = message['client_id']
-                #     ballot_num = message['ballot_num']
-                #     if curr_leader == client_id:
-                #         with p
-                #         print(f"Received INHERIT {ballot_num} from Server {client_id_local}")
-                #         print("PUT IN LEADER QUEUE", client_id_local)
-                #         leader_queue.put(("inherit_lock", client_id_local, 'Null'))
-                #         # leader_queue.queue.insert(0,("inherit_lock", client_id_local, 'Null'))
-                #     # else:
-                #     #     send_to_leader(f"inherit_lock {return_user} Null") #This was breaking code and is unnecessary
-                # elif message_type == "ack_inherit_kvs":
-                #     timeout_flag_inherit_kvs = False
-                #     return_user = message['client_id']
-                #     key_value_store = message['kvs']
-                #     ballot_num = message['ballot_num']
-                #     curr_leader = message['curr_leader']
-                #     # print(f"Updated key value store {key_value_store}")
-                #     print(f"Received ACK_INHERIT {ballot_num} from Server {curr_leader}")
-                #     client_socket.send((json.dumps({
-                #         "type": "ack_ack_inherit_kvs",
-                #         "client_id" : client_id,
-                #         "return_user": return_user,
-                #         "ballot_num": ballot_num
-                #     })+'\n').encode())
-                #     print(f"Sending ACK_ACK_INHERIT {ballot_num} to Server {return_user}")
-                # elif message_type == "ack_ack_inherit_kvs":
-                #     client_id_local = message['client_id']
-                #     print(f"Received ACK_ACK_INHERIT {ballot_num} from Server {client_id_local}")
-                #     with consensus_flag_lock:
-                #         if curr_leader == client_id:
-                #             leader_queue.get() #Remove from leader queue now that INHERIT is decided
-                #             consensus_flag = True
             else:
                 print(f"Received non-JSON message: {message}")
                 handle_exit()
@@ -471,10 +442,6 @@ def create_query_choose_context(message, client_id_local, LLM_answer):
                 # input2 = gemini_answers[parts[1]][int(parts[2])-1]
                 # input2 = LLM_answer
             input2 = parts[2] #answer_num
-    # elif input_type == "inherit_lock":
-    #     input1 = "inherit_lock"
-    #     input2  = parts[1]
-    #     input3 = "Null"
     if curr_leader == 0:
         operation_queue.put((input1, input2, input3))
         propose()
