@@ -31,8 +31,8 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
             buffer += message
             while '\n' in buffer:
                 message, buffer = buffer.split('\n', 1)
-                # print(f"received {message}")
                 bool_json, message = is_json(message)
+                print(f"received {message['type']}")
                 if bool_json:
                     message_type = message['type']
                     # print(f"Found a json string with type {message_type}!!!")
@@ -51,7 +51,7 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
                             # print("Sending from", sockets[client_socket], "to", sockets[client_socket])
                             threading.Thread(target=server_to_client, args=(clients[int(sockets[client_socket]) - 1], message), daemon=True).start()
                     elif message_type in ["promise", "accept", "query", "ack_leader_queued", "GEMINI"]:
-                        if message_type in ["GEMINI", "ack_leader_queued"]:
+                        if message_type in ["GEMINI"]:
                             forward = message['query_from']
                         elif message_type == "promise":
                             forward = message["proposer"]
@@ -67,7 +67,8 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
                         if forward in fail_dct and fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
                             threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
                     elif message_type == "ack_leader_queued":
-                        forward = message["query_from"]
+                        print(f"message = {message}")
+                        forward = message["client_id"]
                         if forward in fail_dct and fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
                             threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
                     elif message_type in ["ack_inherit_kvs", "ack_ack_inherit_kvs"]:
@@ -88,7 +89,7 @@ def server_to_client(client_socket, message): # handles send messages from serve
     time.sleep(3)
     try:
         client_socket.send((json.dumps(message) + '\n').encode())
-        # print(f"Forwarded {message}")
+        print(f"Forwarded {message}")
     except Exception as e:
         print(e)
     return
