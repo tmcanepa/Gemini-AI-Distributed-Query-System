@@ -29,7 +29,7 @@ client_id = 0
 curr_leader = 0
 ballot_num = [0, 0, 0]
 timeout_flag_proposal = True
-timeout_flag_query = True
+timeout_flag_forward = True
 consensus_flag = True
 key_value_store_lock = threading.Lock()
 gemini_answers_lock = threading.Lock()
@@ -170,7 +170,7 @@ def inherit_kvs(bal, proposer):
     return
 
 def handle_messages():
-    global curr_leader,timeout_flag_proposal,timeout_flag_query,leader_queue,operation_queue,consensus_flag, ballot_num, key_value_store, gemini_answers, decide_count
+    global curr_leader,timeout_flag_proposal,timeout_flag_forward,leader_queue,operation_queue,consensus_flag, ballot_num, key_value_store,gemini_answers, decide_count
     buffer = ""
     while True:
         message = client_socket.recv(1024).decode()
@@ -287,9 +287,9 @@ def handle_messages():
                     with key_value_store_lock:
                         if decide_count[bal[2]] == 2:
                             if len(LLM_answer) >= 7 and LLM_answer[:7] == "ANSWER:":
-                                key_value_store[context_id] += f"{LLM_answer}\n"
+                                key_value_store[context_id] += f"{LLM_answer}"
                             else:
-                                key_value_store[context_id] += f"ANSWER: {LLM_answer}\n"
+                                key_value_store[context_id] += f"ANSWER: {LLM_answer}"
                             gemini_answers[context_id] = []
                             print(f"You just added answer to key value store!! {LLM_answer}")
                 elif message_type == "decide_create":
@@ -319,7 +319,7 @@ def handle_messages():
                     print(f"okay i built the operation {operation} ")
                     threading.Thread(target=create_query_choose_context, args=(operation, query_from, LLM_answer)).start()
                 elif message_type == "ack_leader_queued":
-                    timeout_flag_query = False
+                    timeout_flag_forward = False
                     input_type = message['input_type']
                     query_from = message["query_from"]
                     context_id = message["context_id"]
@@ -347,17 +347,22 @@ def handle_messages():
                 handle_exit()
 
 def timed_out(type):
-    global timeout_flag_query, timeout_flag_proposal
+    global timeout_flag_forward, timeout_flag_proposal, consensus_flag
     if type == "operation":
-        if timeout_flag_query:
+        if timeout_flag_forward:
             print("Socket for query Timed Out")
             propose()
-        timeout_flag_query = True
+        timeout_flag_forward = True
     if type == "proposal":
         if timeout_flag_proposal:
             print("Socket for proposal Timed Out")
             propose()
         timeout_flag_proposal = True
+    if type == "consensus":
+        if not consensus_flag:
+            print("Socket for consensus Timed out")
+            propose()
+        consensus_flag = True #Technically consensus was not reached but this is true so leader queue can reattempt
     return
 
 def create_query_choose_context(message, query_from, LLM_answer):
@@ -498,6 +503,7 @@ def leader_queue_thread():
                 consensus_flag = False
                 input1, input2, input3 = leader_queue.queue[0]
                 consensus_operation(input1, input2, input3)
+                threading.Timer(10, timed_out, args=("consensus",)).start()
 
 def valid_input(message):
     parts = message.split()

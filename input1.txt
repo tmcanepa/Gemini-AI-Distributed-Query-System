@@ -22,7 +22,11 @@ viewall
 #query a nonexistent contextid
 query 3 name an animal.
 #Node that receives a forwarded message should forward to real leader <--- How would this happen?
-
+#leader reattempts operation if it does not reach consensus
+coordinator - failnode 2
+coordinator - failnode 3
+query 1 hi
+#Wait 10 seconds and then restart node 2 and 3
 
 
 #Server2 is not leader
@@ -47,6 +51,7 @@ this is a bad input
 #failing an invalid node
 failNode 4
 failNode -1
+
 
 
 
