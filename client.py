@@ -60,13 +60,14 @@ def start_client():
     client_socket.send((json.dumps({
         "client_id": client_id,
         "port_num": port_num,
-        "ballot_num": ballot_num
+        "ballot_num": ballot_num,
+        "kvs" : key_value_store
     })).encode())
     response = client_socket.recv(1024).decode()
     _, response_json = server.is_json(response)
     if response_json["type"] != "Success":
         print("Failure to send server clientid")
-    sendid1, sendid2 = get_other_server_ids()
+    # sendid1, sendid2 = get_other_server_ids()
     # if curr_leader != client_id:
     #     inherit_kvs(ballot_num, sendid1, sendid2)
     threading.Thread(target=handle_messages).start()
@@ -90,7 +91,8 @@ def propose():
         "ballot_num": ballot_num,
         "send_id1": send_id1,
         "send_id2": send_id2,
-        "proposer": client_id
+        "proposer": client_id,
+        "kvs": key_value_store
     })+'\n').encode())
     with print_lock:
         print(f"Sending PREPARE {ballot_num} to ALL")
@@ -102,7 +104,9 @@ def promise(bal, proposer):
         "type": "promise",
         "proposer": proposer,
         "ballot_num": bal,
-        "promiser": client_id
+        "promiser": client_id,
+        "curr_leader": curr_leader,
+        "kvs": key_value_store
     })+'\n').encode())
     with print_lock:
         print(f"Sending PROMISE {ballot_num} to Server {proposer}")
@@ -112,7 +116,8 @@ def accept(promiser):
         "type": "accept",
         "promiser": promiser,
         "client_id": client_id,
-        "ballot_num": ballot_num
+        "ballot_num": ballot_num,
+        "kvs": key_value_store
     })+'\n').encode())
     with print_lock:
         print(f"Sending ACCEPT {ballot_num} to Server {promiser}")
@@ -183,30 +188,55 @@ def handle_messages():
             message, buffer = buffer.split('\n', 1)
             bool_json, message = server.is_json(message)
             # print(f"Received {message}")
+            bal = message['ballot_num']
+            if bal[2] > ballot_num[2] + 1:
+                print("UPDATING KVS FOR BALLOT", bal)
+                key_value_store = message['kvs']
             if bool_json:
                 message_type = message['type']
                 if message_type == "prepare":
                     bal = message['ballot_num']
+                    if bal[2] >= ballot_num[2]: #might be allowed to be equal for leader election
+                        print("UPDATING KVS FOR BALLOT", bal, "NEW KVS", message['kvs'])
+                        print("NEW KVS", message['kvs'])
+                        key_value_store = message['kvs']
                     proposer = message['proposer']
+                    
+                elif message_type == "promise": #might be allowed to be equal for leader election
                     with print_lock:
                         print(f"Received PREPARE {bal} from Server {proposer}")
                     # print("Ballots: ", bal, ballot_num)
                     if bal >= ballot_num:
-                        ballot_num = bal
-                        promise(bal, proposer)
+                        if bal[2] < ballot_num[2]:
+                            promise(ballot_num, proposer)
+                        else:
+                            ballot_num = bal
+                            promise(bal, proposer)
                 elif message_type == "promise":
                     timeout_flag_proposal = False
                     curr_leader = client_id
+                    decide_count = defaultdict(lambda: 0)
                     leader_queue = operation_queue
                     promiser = message['promiser']
+                    bal = message['ballot_num']
+                    if bal[2] >= ballot_num[2]:
+                        print("UPDATING KVS FOR BALLOT", bal, "NEW KVS", message['kvs'])
+                        key_value_store = message['kvs']
+                        curr_leader = message['curr_leader']
                     with print_lock:
                         print(f"Received PROMISE {ballot_num} from Server {promiser}")
                     accept(promiser)
                 elif message_type == "accept":
                     bal = message['ballot_num']
                     curr_leader = bal[1]
+                    decide_count = defaultdict(lambda: 0)
+                    if bal[2] >= ballot_num[2]: #might be allowed to be equal for leader election
+                        print("UPDATING KVS FOR BALLOT", bal)
+                        print("NEW KVS", message['kvs'])
+                        key_value_store = message['kvs']
                     with print_lock:
                         print(f"Received ACCEPT {bal} from Server {curr_leader}")
+                    # print(f"{curr_leader} is the leader")
                 elif message_type == "propose_query":
                     send_id1, send_id2 = get_other_server_ids()
                     context_id = message['context_id']
@@ -229,8 +259,9 @@ def handle_messages():
                         "send_id1": send_id1,
                         "send_id2": send_id2,
                         "client_id": client_id,
-                        "ballot_num": bal,
-                        "LLM_answer" : LLM_answer
+                        "ballot_num": ballot_num,
+                        "LLM_answer" : LLM_answer,
+                        "kvs": key_value_store
                     }) + '\n').encode())
                     with print_lock:
                         print(f"Sending DECIDE {bal} query {context_id} {query} to ALL")
@@ -255,8 +286,9 @@ def handle_messages():
                         "send_id1": send_id1,
                         "send_id2": send_id2,
                         "client_id": client_id,
-                        "ballot_num": bal,
-                        "answer_num" : answer_num
+                        "ballot_num": ballot_num,
+                        "answer_num" : answer_num,
+                        "kvs": key_value_store
                     }) + '\n').encode())
                     with print_lock:
                         print(f"Sending DECIDE {bal} answer {answer_num} {LLM_answer} to ALL")
@@ -276,7 +308,8 @@ def handle_messages():
                         "send_id1": send_id1,
                         "send_id2": send_id2,
                         "client_id": client_id,
-                        "ballot_num": bal
+                        "ballot_num": ballot_num,
+                        "kvs": key_value_store
                     }) + '\n').encode())
                     with print_lock:
                         print(f"Sending DECIDE {bal} create {context_id} to ALL")
@@ -515,6 +548,7 @@ def send_to_leader(message):
             "query": query,
             "answer_num": answer_num,
             "ballot_num": ballot_num,
+            "kvs": key_value_store,
             "additional_print" : additional_print
         }) + '\n').encode())
         print(f"Sending FORWARD {ballot_num} {input_type} {context_id} {additional_print}to Server {curr_leader}") #the gap is intentioinal
@@ -540,7 +574,8 @@ def consensus_operation(input1, input2, input3):
             "send_id1": send_id1,
             "send_id2": send_id2,
             "client_id": client_id,
-            "ballot_num": ballot_num
+            "ballot_num": ballot_num,
+            "kvs": key_value_store
         })+'\n').encode())
         print(f"Sending ACCEPTED {ballot_num} create {context_id} to ALL")
     elif input3 == "choose":
@@ -559,7 +594,8 @@ def consensus_operation(input1, input2, input3):
             "send_id2": send_id2,
             "client_id": client_id,
             "ballot_num": ballot_num,
-            "answer_num": answer_num
+            "answer_num": answer_num,
+            "kvs": key_value_store
         })+'\n').encode())
         print(f"Sending ACCEPTED {ballot_num} answer {answer_num} {LLM_answer} to ALL")
     else:
@@ -575,7 +611,8 @@ def consensus_operation(input1, input2, input3):
             "send_id1": send_id1,
             "send_id2": send_id2,
             "client_id": client_id,
-            "ballot_num": ballot_num
+            "ballot_num": ballot_num,
+            "kvs": key_value_store
         })+'\n').encode())
         print(f"Sending ACCEPTED {ballot_num} query {context_id} {query} to ALL")
     return
@@ -596,7 +633,8 @@ def leader_queue_thread():
                             "kvs": key_value_store,
                             "curr_leader": client_id,
                             "client_id": client_id,
-                            "return_user": input2
+                            "return_user": input2,
+                            "kvs": key_value_store
                         })+'\n').encode())
                     print(f"Sending ACK_INHERIT {ballot_num} to Server {input2}")
                 else:
