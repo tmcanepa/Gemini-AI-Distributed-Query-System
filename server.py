@@ -36,7 +36,7 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
                 if bool_json:
                     message_type = message['type']
                     print(f"Found a json string with type {message_type}!!!")
-                    if message_type in ["prepare", "propose_query", "propose_choose", "propose_create", "decide_query", "decide_choose", "decide_create"]:
+                    if message_type in ["prepare", "propose_query", "propose_choose", "propose_create", "decide_query", "decide_choose", "decide_create", "inherit_kvs"]:
                         send_id1 = message['send_id1']
                         send_id2 = message['send_id2']
                         print("Failed links", fail_links)
@@ -47,7 +47,7 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
                         if send_id2 in fail_dct and fail_dct[send_id2] and (sockets[client_socket], send_id2) not in fail_links:
                             print("Sending from", sockets[client_socket], "to", send_id2)
                             threading.Thread(target=server_to_client, args=(clients[int(send_id2) - 1], message), daemon=True).start()
-                        if fail_dct[sockets[client_socket]] and (sockets[client_socket], sockets[client_socket]) not in fail_links and message_type != "prepare":
+                        if fail_dct[sockets[client_socket]] and (sockets[client_socket], sockets[client_socket]) not in fail_links and message_type not in ["prepare","inherit_kvs"]:
                             print("Sending from", sockets[client_socket], "to", sockets[client_socket])
                             threading.Thread(target=server_to_client, args=(clients[int(sockets[client_socket]) - 1], message), daemon=True).start()
                     elif message_type in ["promise", "accept", "query", "ack_leader_queued", "GEMINI"]:
@@ -70,12 +70,8 @@ def primary_handle_client(client_socket): # Everytime a client connects, it has 
                         forward = message["query_from"]
                         if forward in fail_dct and fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
                             threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
-                    elif message_type == "inherit_kvs":
-                        forward = message["leader"]
-                        if fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
-                            threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
-                    elif message_type == "ack_inherit_kvs":
-                        forward = message["client_id"]
+                    elif message_type in ["ack_inherit_kvs", "ack_ack_inherit_kvs"]:
+                        forward = message["return_user"]
                         if fail_dct[forward] and (sockets[client_socket], forward) not in fail_links:
                             threading.Thread(target=server_to_client, args=(clients[int(forward) - 1], message), daemon=True).start()
                 else:

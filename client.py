@@ -56,12 +56,15 @@ def start_client():
     port_num = client_socket.getsockname()[1]
     client_socket.send((json.dumps({
         "client_id": client_id,
-        "port_num": port_num
+        "port_num": port_num,
+        "ballot_num": ballot_num
     })).encode())
     response = client_socket.recv(1024).decode()
     _, response_json = server.is_json(response)
     if response_json["type"] != "Success":
         print("Failure to send server clientid")
+    sendid1, sendid2 = get_other_server_ids()
+    inherit_kvs(ballot_num, sendid1, sendid2)
     threading.Thread(target=handle_messages).start()
 
 def get_other_server_ids():
@@ -140,7 +143,8 @@ def ask_gemini(query, context_id, query_from):
             "type": "GEMINI",
             "query_from": query_from,
             "context_id": context_id,
-            "response": response
+            "response": response,
+            "ballot_num": ballot_num
         })+'\n').encode())
     return
 
@@ -156,16 +160,15 @@ def build_operation(message) -> str:
         print(f"You should not be building right now with {message['type']}")
         return ""
     
-def inherit_kvs(bal, proposer):
+def inherit_kvs(bal, sendid1, sendid2):
     global key_value_store
     print("Trying to inherit updated key value store")
-    send_id1, send_id2 = get_other_server_ids()
     client_socket.send((json.dumps({
         "type": "inherit_kvs",
         "ballot_num": bal,
-        "proposer": proposer,
+        "send_id1": sendid1,
+        "send_id2": sendid2,
         "client_id": client_id,
-        "leader": curr_leader
     })+'\n').encode())
     return
 
@@ -182,6 +185,16 @@ def handle_messages():
             message, buffer = buffer.split('\n', 1)
             bool_json, message = server.is_json(message)
             print(f"Received {message}")
+
+            # bal = message['ballot_num']
+            # if bal[2] > ballot_num[2] + 1:
+            #     if 'client_id' in message:
+            #         curr_leader = message['client_id']
+            #     else:
+            #         curr_leader = message['proposer']
+            #     key_value_store_lock.acquire()
+            #     gemini_answers_lock.acquire()
+            #     inherit_kvs(message['ballot_num'], curr_leader)
             if bool_json:
                 message_type = message['type']
                 # print(f"Received a JSON message with type {message_type}!!!")
@@ -189,10 +202,10 @@ def handle_messages():
                     bal = message['ballot_num']
                     proposer = message['proposer']
                     print("Ballots: ", bal, ballot_num)
-                    if bal >= ballot_num:
-                        if bal[2] > ballot_num:
-                            inherit_kvs(bal, proposer)
-                        promise(bal, proposer)
+                    # if bal >= ballot_num:
+                    #     if bal[2] > ballot_num:
+                    #         inherit_kvs(bal, proposer)
+                    promise(bal, proposer)
                 elif message_type == "promise":
                     timeout_flag_proposal = False
                     curr_leader = client_id
@@ -211,7 +224,7 @@ def handle_messages():
                     bal = message['ballot_num']
                     if bal >= ballot_num:
                         print("NEED TO IMPLEMENT STORING THE QUERY IN CASE OF LEADER FAILURE")
-                    ballot_num = bal
+                        ballot_num = bal
                     print("NEED TO IMPLEMENT STORING THE QUERY IN CASE OF LEADER FAILURE")
                     client_socket.send((json.dumps({
                         "type": "decide_query",
@@ -268,7 +281,9 @@ def handle_messages():
                     query_from = message['query_from']
                     query = message['query']
                     len_query = len(query)
+                    # print("BEFORE LOCKS")
                     with key_value_store_lock and gemini_answers_lock:
+                        # time.sleep(1)
                         if decide_count[bal[2]] == 2:
                             key_value_store[context_id] += f"QUERY: {query}\n"
                             ask_gemini(key_value_store[context_id], context_id, query_from)
@@ -331,17 +346,35 @@ def handle_messages():
                     if input_type == "choose":
                         delete_from_operation_queue(context_id, query, query_from)
                 elif message_type == "inherit_kvs":
-                    proposer = message['proposer']
-                    client_socket.send((json.dumps({
-                        "type": "ack_inherit_kvs",
-                        "proposer": proposer,
-                        "client_id": client_id,
-                        "ballot_num": ballot_num,
-                        "kvs": key_value_store
-                    })+'\n').encode())
+                    return_user = message['client_id']
+                    if curr_leader == client_id:
+                        # client_socket.send((json.dumps({
+                        #     "type": "ack_inherit_kvs",
+                        #     "proposer": proposer,
+                        #     "client_id": return_to,
+                        #     "ballot_num": ballot_num,
+                        #     "kvs": key_value_store
+                        # })+'\n').encode())
+                        print("PUT IN LEADER QUEUE", return_user)
+                        leader_queue.put(("inherit_lock", return_user, 'Null'))
                 elif message_type == "ack_inherit_kvs":
+                    # with key_value_store_lock and gemini_answers_lock:
+                    # print("RELEASED LOCKS")
+                    # key_value_store_lock.release()
+                    # gemini_answers_lock.release()
+                    return_user = message['client_id']
                     key_value_store = message['kvs']
+                    ballot_num = message['ballot_num']
+                    curr_leader = message['curr_leader']
                     print(f"Updated key value store {key_value_store}")
+                    client_socket.send((json.dumps({
+                        "type": "ack_ack_inherit_kvs",
+                        "return_user": return_user,
+                        "ballot_num": ballot_num
+                    })+'\n').encode())
+                elif message_type == "ack_ack_inherit_kvs":
+                    leader_queue.get()
+                    consensus_flag = True
             else:
                 print(f"Received non-JSON message: {message}")
                 handle_exit()
@@ -497,7 +530,17 @@ def leader_queue_thread():
                 print("Handling a leader operation")
                 consensus_flag = False
                 input1, input2, input3 = leader_queue.queue[0]
-                consensus_operation(input1, input2, input3)
+                if input1 == "inherit_lock":
+                    client_socket.send((json.dumps({
+                            "type": "ack_inherit_kvs",
+                            "ballot_num": ballot_num,
+                            "kvs": key_value_store,
+                            "curr_leader": client_id,
+                            "client_id": client_id,
+                            "return_user": input2
+                        })+'\n').encode())
+                else:
+                    consensus_operation(input1, input2, input3)
 
 def valid_input(message):
     parts = message.split()
