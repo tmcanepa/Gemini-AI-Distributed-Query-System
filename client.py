@@ -95,7 +95,7 @@ def propose():
     })+'\n').encode())
     if not stop_elect_flag:
         threading.Timer(10, timed_out, args=("proposal",)).start()
-    stop_elect_flag = False
+    # stop_elect_flag = False
     return
 
 def promise(bal, proposer):
@@ -193,26 +193,15 @@ def handle_messages():
                 message_type = message['type']
                 # print(f"Received a JSON message with type {message_type}!!!")
                 if message_type == "update":
+                    timeout_flag_proposal = False
                     key_value_store = message['kvs']
                     curr_leader = message['curr_leader']
-                    print("RECEIVED UPDATE")
+                    stop_elect_flag = True
                     if curr_leader == client_id:
-                        stop_elect_flag = True
-                        # consensus_flag_lock.release()
-                        leader_queue.get() 
-                        consensus_flag = True                      
-                        leader_queue.put((ran_mess, message['send_id1'], 'Null'))
+                        print("Putting", ran_mess, "in leader queue")
+                        leader_queue.put((ran_mess, message['send_id1'], ran_mess))
                     else:
-                        print("SENDING", ran_mess, "to LEADER", curr_leader)
-                        # consensus_flag_lock.release()
-                        if not operation_queue.empty():
-                            if ran_mess == operation_queue.queue[0]:
-                                operation_queue.get()
-                                consensus_flag = True       
-                                create_query_choose_context(ran_mess, client_id, "NULL")
-                            else:
-                                consensus_flag = True       
-                                create_query_choose_context(ran_mess, client_id, "NULL")
+                        send_to_leader(ran_mess)
 
                 if message_type == "prepare":
                     bal = message['ballot_num']
@@ -224,6 +213,7 @@ def handle_messages():
                     if bal >= ballot_num:
                         if bal[2] < ballot_num[2]:
                             send_id1 = message['proposer']
+                            print("Sending UPDATE to", send_id1, "for ballot", bal)
                             client_socket.send((json.dumps({
                                 "type": "update",
                                 "context_id": context_id,
@@ -356,7 +346,6 @@ def handle_messages():
                     context_id = message['context_id']
                     query_from = message['query_from']
                     query = message['query']
-                    len_query = len(query)
                     with key_value_store_lock and gemini_answers_lock:
                         if decide_count[tuple(bal)] == 2:
                             key_value_store[context_id] += f"QUERY: {query}\n"
@@ -550,10 +539,11 @@ def view_all_context():
 
 def consensus_operation(input1, input2, input3):
     send_id1, send_id2 = get_other_server_ids()
-    print(f"Getting CONSENSUS on {input1} {input2}")
-    if input3 == "create":
+    print(f"Getting CONSENSUS on {input1} {input2} with {input3}")
+    if input3.startswith("create"):
         context_id = input2
         ballot_num[2] += 1
+        print("Sending PROPOSE CREATE", ballot_num, "to ALL")
         client_socket.send((json.dumps({
             "type": "propose_create",
             "context_id": context_id,
