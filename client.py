@@ -36,6 +36,9 @@ gemini_answers_lock = threading.Lock()
 consensus_flag_lock = threading.Lock()
 queue_lock = threading.Lock()
 
+ran_mess = None
+stop_elect_flag = False
+
 gemini_answers = defaultdict(list)
 
 def testing_purposes(test):
@@ -57,14 +60,13 @@ def start_client():
     client_socket.send((json.dumps({
         "client_id": client_id,
         "port_num": port_num,
-        "ballot_num": ballot_num
+        "ballot_num": ballot_num,
+        "kvs": key_value_store
     })).encode())
     response = client_socket.recv(1024).decode()
     _, response_json = server.is_json(response)
     if response_json["type"] != "Success":
         print("Failure to send server clientid")
-    sendid1, sendid2 = get_other_server_ids()
-    inherit_kvs(ballot_num, sendid1, sendid2)
     threading.Thread(target=handle_messages).start()
 
 def get_other_server_ids():
@@ -74,30 +76,36 @@ def get_other_server_ids():
         send_id1 = 3
     if send_id2 == 0:
         send_id2 = 3
-    print(f"Found other ids {send_id1} and {send_id2}")
+    # print(f"Found other ids {send_id1} and {send_id2}")
     return send_id1, send_id2
 
 def propose():
-    global ballot_num
+    global ballot_num, stop_elect_flag
     send_id1, send_id2 = get_other_server_ids()
     ballot_num[0] += 1
-    print("Sending prepare")
+    ballot_num[1] = client_id
+    print("Sending PREPARE", ballot_num, "to ALL")
     client_socket.send((json.dumps({
         "type": "prepare",
         "ballot_num": ballot_num,
         "send_id1": send_id1,
         "send_id2": send_id2,
-        "proposer": client_id
+        "proposer": client_id,
+        "kvs": key_value_store
     })+'\n').encode())
-    threading.Timer(10, timed_out, args=("proposal",)).start()
+    if not stop_elect_flag:
+        threading.Timer(10, timed_out, args=("proposal",)).start()
+    stop_elect_flag = False
     return
 
 def promise(bal, proposer):
+    print("Sending PROMISE", bal, "to SERVER", proposer)
     client_socket.send((json.dumps({
         "type": "promise",
         "proposer": proposer,
         "ballot_num": bal,
-        "promiser": client_id
+        "promiser": client_id,
+        "kvs": key_value_store
     })+'\n').encode())
 
 def accept(promiser):
@@ -105,22 +113,26 @@ def accept(promiser):
         "type": "accept",
         "promiser": promiser,
         "client_id": client_id,
-        "ballot_num": ballot_num
+        "ballot_num": ballot_num,
+        "kvs": key_value_store
     })+'\n').encode())
+    print("Sending ACCEPT", ballot_num, "to SERVER", promiser)
+    # print("OPP QUEUE", operation_queue.queue)
+    # print("LEADER QUEUE", leader_queue.queue)
 
 def delete_from_operation_queue(input1, input2, input3):
     global operation_queue
-    print(f"Trying to delete from operation queue input1 = {input1} input2 = {input2} input3 =  {input3}")
+    # print(f"Trying to delete from operation queue input1 = {input1} input2 = {input2} input3 =  {input3}")
     query_to_remove = (input1, input2, input3)
     temp_list = list(operation_queue.queue)
-    print(f"temp_list  = {temp_list}")
+    # print(f"temp_list  = {temp_list}")
     if query_to_remove in temp_list:
-        print(f"Just deleted {query_to_remove} from operation queue!")
+        # print(f"Just deleted {query_to_remove} from operation queue!")
         temp_list.remove(query_to_remove)
     with queue_lock:
         operation_queue.queue.clear()
         for item in temp_list:
-            print(f"trying to add item = {item}")
+            # print(f"trying to add item = {item}")
             if not isinstance(item, tuple) or len(item) != 3:
                 print(f"Invalid item: {item}")
                 continue
@@ -137,19 +149,20 @@ def ask_gemini(query, context_id, query_from):
     print(f"This server found response {response}")
     if query_from == client_id:
         gemini_answers[context_id].append(response)
-        print(f"Answer{len(gemini_answers[context_id])} = {response}")
+        print(f"Answer{len(gemini_answers[context_id])} for context {context_id} = {response}")
     else:
         client_socket.send((json.dumps({
             "type": "GEMINI",
             "query_from": query_from,
             "context_id": context_id,
             "response": response,
-            "ballot_num": ballot_num
+            "ballot_num": ballot_num,
+            "kvs": key_value_store
         })+'\n').encode())
     return
 
 def build_operation(message) -> str:
-    print(f"building an operation using json {json.dumps(message)}")
+    # print(f"building an operation using json {json.dumps(message)}")
     if message['input_type'] == "query":
         return f"query {message['context_id']} {message['query']}"
     elif message['input_type'] == "choose":
@@ -159,21 +172,9 @@ def build_operation(message) -> str:
     else:
         print(f"You should not be building right now with {message['type']}")
         return ""
-    
-def inherit_kvs(bal, sendid1, sendid2):
-    global key_value_store
-    print("Trying to inherit updated key value store")
-    client_socket.send((json.dumps({
-        "type": "inherit_kvs",
-        "ballot_num": bal,
-        "send_id1": sendid1,
-        "send_id2": sendid2,
-        "client_id": client_id,
-    })+'\n').encode())
-    return
 
 def handle_messages():
-    global curr_leader,timeout_flag_proposal,timeout_flag_query,leader_queue,operation_queue,consensus_flag, ballot_num, key_value_store, gemini_answers, decide_count
+    global curr_leader,timeout_flag_proposal,timeout_flag_query,leader_queue,operation_queue,consensus_flag, ballot_num, key_value_store, gemini_answers, decide_count, stop_elect_flag, ran_mess
     buffer = ""
     while True:
         message = client_socket.recv(1024).decode()
@@ -184,38 +185,70 @@ def handle_messages():
         while '\n' in buffer:
             message, buffer = buffer.split('\n', 1)
             bool_json, message = server.is_json(message)
-            print(f"Received {message}")
-
-            # bal = message['ballot_num']
-            # if bal[2] > ballot_num[2] + 1:
-            #     if 'client_id' in message:
-            #         curr_leader = message['client_id']
-            #     else:
-            #         curr_leader = message['proposer']
-            #     key_value_store_lock.acquire()
-            #     gemini_answers_lock.acquire()
-            #     inherit_kvs(message['ballot_num'], curr_leader)
+            # print(f"Received {message}")
+            bal = message['ballot_num']
+            if bal[2] >= ballot_num[2] + 1:
+                key_value_store = message['kvs']
             if bool_json:
                 message_type = message['type']
                 # print(f"Received a JSON message with type {message_type}!!!")
+                if message_type == "update":
+                    key_value_store = message['kvs']
+                    curr_leader = message['curr_leader']
+                    print("RECEIVED UPDATE")
+                    if curr_leader == client_id:
+                        stop_elect_flag = True
+                        # consensus_flag_lock.release()
+                        leader_queue.get() 
+                        consensus_flag = True                      
+                        leader_queue.put((ran_mess, message['send_id1'], 'Null'))
+                    else:
+                        print("SENDING", ran_mess, "to LEADER", curr_leader)
+                        # consensus_flag_lock.release()
+                        if not operation_queue.empty():
+                            if ran_mess == operation_queue.queue[0]:
+                                operation_queue.get()
+                                consensus_flag = True       
+                                create_query_choose_context(ran_mess, client_id, "NULL")
+                            else:
+                                consensus_flag = True       
+                                create_query_choose_context(ran_mess, client_id, "NULL")
+
                 if message_type == "prepare":
                     bal = message['ballot_num']
+                    if bal[2] > ballot_num[2]:
+                        key_value_store = message['kvs']
                     proposer = message['proposer']
-                    print("Ballots: ", bal, ballot_num)
-                    # if bal >= ballot_num:
-                    #     if bal[2] > ballot_num:
-                    #         inherit_kvs(bal, proposer)
-                    promise(bal, proposer)
+                    # print("Ballots: ", bal, ballot_num)
+                    print("Recieved PREPARE for", bal, "from SERVER", proposer)
+                    if bal >= ballot_num:
+                        if bal[2] < ballot_num[2]:
+                            send_id1 = message['proposer']
+                            client_socket.send((json.dumps({
+                                "type": "update",
+                                "context_id": context_id,
+                                "send_id1": send_id1,
+                                "client_id": client_id,
+                                "ballot_num": ballot_num,
+                                "kvs": key_value_store,
+                                "curr_leader": curr_leader
+                            }) + '\n').encode())
+                        else:
+                            ballot_num = bal
+                            promise(bal, proposer)
                 elif message_type == "promise":
                     timeout_flag_proposal = False
                     curr_leader = client_id
                     leader_queue = operation_queue
                     promiser = message['promiser']
+                    print("Received PROMISE", message['ballot_num'], "from SERVER", promiser)
                     accept(promiser)
-                    print(f"Leader election is complete, {curr_leader} is leader")
+                    # print(f"Leader election is complete, {curr_leader} is leader")
                 elif message_type == "accept":
+                    bal = message['ballot_num']
                     curr_leader = message['client_id']
-                    print(f"{curr_leader} is the leader")
+                    print("Received ACCEPT", bal, "from SERVER", message['promiser'])
+                    # print(f"{curr_leader} is the leader")
                 elif message_type == "propose_query":
                     send_id1, send_id2 = get_other_server_ids()
                     context_id = message['context_id']
@@ -223,19 +256,31 @@ def handle_messages():
                     query = message['query']
                     bal = message['ballot_num']
                     if bal >= ballot_num:
-                        print("NEED TO IMPLEMENT STORING THE QUERY IN CASE OF LEADER FAILURE")
                         ballot_num = bal
-                    print("NEED TO IMPLEMENT STORING THE QUERY IN CASE OF LEADER FAILURE")
-                    client_socket.send((json.dumps({
-                        "type": "decide_query",
-                        "context_id": context_id,
-                        "query_from": query_from,
-                        "query": query,
-                        "send_id1": send_id1,
-                        "send_id2": send_id2,
-                        "client_id": client_id,
-                        "ballot_num": ballot_num
-                    }) + '\n').encode())
+                    print(f"Received PROPOSE QUERY for context id = {context_id} with query = {query} from {query_from}")
+                    if bal >= ballot_num:
+                        client_socket.send((json.dumps({
+                            "type": "decide_query",
+                            "context_id": context_id,
+                            "query_from": query_from,
+                            "query": query,
+                            "send_id1": send_id1,
+                            "send_id2": send_id2,
+                            "client_id": client_id,
+                            "ballot_num": ballot_num,
+                            "kvs": key_value_store
+                        }) + '\n').encode())
+                        print(f"Sending DECIDE QUERY for context id = {context_id} with query = {query} to ALL")
+                    else:
+                        client_socket.send((json.dumps({
+                                "type": "update",
+                                "context_id": context_id,
+                                "send_id1": send_id1,
+                                "client_id": client_id,
+                                "ballot_num": ballot_num,
+                                "kvs": key_value_store,
+                                "curr_leader": curr_leader
+                            }) + '\n').encode())
                 elif message_type == "propose_choose":
                     send_id1, send_id2 = get_other_server_ids()
                     context_id = message['context_id']
@@ -243,54 +288,83 @@ def handle_messages():
                     LLM_answer = message['LLM_answer']
                     bal = message['ballot_num']
                     if bal >= ballot_num:
-                        print("NEED TO IMPLEMENT STORING THE QUERY IN CASE OF LEADER FAILURE")
-                    ballot_num = bal
-                    print("NEED TO IMPLEMENT STORING THE QUERY IN CASE OF LEADER FAILURE")
-                    client_socket.send((json.dumps({
-                        "type": "decide_choose",
-                        "context_id": context_id,
-                        "query_from": query_from,
-                        "LLM_answer": LLM_answer,
-                        "send_id1": send_id1,
-                        "send_id2": send_id2,
-                        "client_id": client_id,
-                        "ballot_num": ballot_num
-                    }) + '\n').encode())
+                        ballot_num = bal
+                    print(f"Received PROPOSE CHOOSE for context id = {context_id} with answer = {LLM_answer} from {query_from}")
+                    if bal >= ballot_num:
+                        client_socket.send((json.dumps({
+                            "type": "decide_choose",
+                            "context_id": context_id,
+                            "query_from": query_from,
+                            "LLM_answer": LLM_answer,
+                            "send_id1": send_id1,
+                            "send_id2": send_id2,
+                            "client_id": client_id,
+                            "ballot_num": ballot_num,
+                            "kvs": key_value_store
+                        }) + '\n').encode())
+                        print(f"Sending DECIDE CHOOSE for context id = {context_id} with answer = {LLM_answer} to ALL")
+                    else:
+                        client_socket.send((json.dumps({
+                                "type": "update",
+                                "context_id": context_id,
+                                "send_id1": send_id1,
+                                "client_id": client_id,
+                                "ballot_num": ballot_num,
+                                "kvs": key_value_store,
+                                "curr_leader": curr_leader
+                            }) + '\n').encode())
                 elif message_type == "propose_create":
                     bal = message['ballot_num']
                     if bal[2] == ballot_num[2] + 1:
                         ballot_num = bal
                     send_id1, send_id2 = get_other_server_ids()
                     context_id = message['context_id']
-                    client_socket.send((json.dumps({
-                        "type": "decide_create",
-                        "context_id": context_id,
-                        "send_id1": send_id1,
-                        "send_id2": send_id2,
-                        "client_id": client_id,
-                        "ballot_num": ballot_num
-                    }) + '\n').encode())
+                    print(f"Received PROPOSE CREATE for context id = {context_id}")
+                    # print("DECIDE COUNT =", decide_count)
+                    if bal >= ballot_num:
+                        client_socket.send((json.dumps({
+                            "type": "decide_create",
+                            "context_id": context_id,
+                            "send_id1": send_id1,
+                            "send_id2": send_id2,
+                            "client_id": client_id,
+                            "ballot_num": ballot_num,
+                            "kvs": key_value_store
+                        }) + '\n').encode())
+                        print(f"Sending DECIDE CREATE for context id = {context_id} to ALL")
+                    else:
+                        client_socket.send((json.dumps({
+                                "type": "update",
+                                "context_id": context_id,
+                                "send_id1": send_id1,
+                                "client_id": client_id,
+                                "ballot_num": ballot_num,
+                                "kvs": key_value_store,
+                                "curr_leader": curr_leader
+                            }) + '\n').encode())
                 elif message_type == "decide_query":
                     bal = message['ballot_num']
-                    decide_count[bal[2]] = decide_count[bal[2]] + 1
+                    decide_count[tuple(bal)] = decide_count[tuple(bal)] + 1
+                    q_mes = message['query']
+                    q_from = message['query_from']
                     with consensus_flag_lock:
-                        if curr_leader == client_id and decide_count[ballot_num[2]] == 2:
+                        # print("DECIDE COUNT =", decide_count)
+                        if curr_leader == client_id and decide_count[tuple(ballot_num)] == 2:
                                 leader_queue.get() #Remove from leader queue now that query is decided
                                 consensus_flag = True
+                                print("Received DECIDE", bal, "for query", q_mes, "from", q_from)
                     context_id = message['context_id']
                     query_from = message['query_from']
                     query = message['query']
                     len_query = len(query)
-                    # print("BEFORE LOCKS")
                     with key_value_store_lock and gemini_answers_lock:
-                        # time.sleep(1)
-                        if decide_count[bal[2]] == 2:
+                        if decide_count[tuple(bal)] == 2:
                             key_value_store[context_id] += f"QUERY: {query}\n"
                             ask_gemini(key_value_store[context_id], context_id, query_from)
-                            print(f"You just added for context id  = {context_id} a query = {query} to key value store!!")
+                            # print(f"You just added for context id  = {context_id} a query = {query} to key value store!!")
                 elif message_type == "decide_choose":
                     bal = message['ballot_num']
-                    decide_count[bal[2]] = decide_count[bal[2]] + 1
+                    decide_count[tuple(bal)] = decide_count[tuple(bal)] + 1
                     with consensus_flag_lock:
                         if curr_leader == client_id and decide_count[ballot_num[2]] == 2:
                                 leader_queue.get() #Remove from leader queue now that query is decided
@@ -299,39 +373,43 @@ def handle_messages():
                     LLM_answer = message['LLM_answer']
                     query_from = message['query_from']
                     len_LLM_answer = len(LLM_answer)
+                    mes_cli = message['client_id']
+                    print(f"Received DECIDE {ballot_num} answer {mes_cli} {LLM_answer} from Server {query_from}")
                     with key_value_store_lock:
-                        if decide_count[bal[2]] == 2:
+                        if decide_count[tuple(bal)] == 2:
                             if len(LLM_answer) >= 7 and LLM_answer[:7] == "ANSWER:":
                                 key_value_store[context_id] += f"{LLM_answer}\n"
                             else:
                                 key_value_store[context_id] += f"ANSWER: {LLM_answer}\n"
                             gemini_answers[context_id] = []
-                            print(f"You just added answer to key value store!! {LLM_answer}")
+                            # print(f"You just added answer to key value store!! {LLM_answer}")
                 elif message_type == "decide_create":
                     bal = message['ballot_num']
-                    decide_count[bal[2]] = decide_count[bal[2]] + 1
+                    decide_count[tuple(bal)] = decide_count[tuple(bal)] + 1
+                    sender = message['client_id']
                     with consensus_flag_lock:
-                        if curr_leader == client_id and decide_count[ballot_num[2]] == 2:
+                        if curr_leader == client_id and decide_count[tuple(bal)] == 2:
                                 leader_queue.get() #Remove from leader queue now that query is decided
                                 consensus_flag = True
                     context_id = message['context_id']
                     with key_value_store_lock:
-                        if decide_count[bal[2]] == 2:
+                        if decide_count[tuple(bal)] == 2:
                             key_value_store[context_id] = ""
-                            print(f"You just created a key value store!! {context_id}")
+                            print(f"Received DECIDE {ballot_num} create {context_id} from Server {sender}")
                 elif message_type == "GEMINI":
                     context_id = message['context_id']
                     response = message['response']
                     with gemini_answers_lock:
                         gemini_answers[context_id].append(response)
-                        print(f"Answer{len(gemini_answers[context_id])} = {response}")
+                        print(f"Answer{len(gemini_answers[context_id])} for context {context_id} = {response}")
                 elif message_type == "forward_to_leader":
                     message["type"] = "ack_leader_queued"
                     query_from = message["query_from"]
                     LLM_answer = message["query"]
+                    message["kvs"] = key_value_store
                     client_socket.send((json.dumps(message) + '\n').encode())
                     operation = build_operation(message)
-                    print(f"okay i built the operation {operation} ")
+                    # print(f"okay i built the operation {operation} ")
                     threading.Thread(target=create_query_choose_context, args=(operation, query_from, LLM_answer)).start()
                 elif message_type == "ack_leader_queued":
                     timeout_flag_query = False
@@ -348,29 +426,19 @@ def handle_messages():
                 elif message_type == "inherit_kvs":
                     return_user = message['client_id']
                     if curr_leader == client_id:
-                        # client_socket.send((json.dumps({
-                        #     "type": "ack_inherit_kvs",
-                        #     "proposer": proposer,
-                        #     "client_id": return_to,
-                        #     "ballot_num": ballot_num,
-                        #     "kvs": key_value_store
-                        # })+'\n').encode())
-                        print("PUT IN LEADER QUEUE", return_user)
-                        leader_queue.put(("inherit_lock", return_user, 'Null'))
+                        # print("PUT IN LEADER QUEUE", return_user)
+                        leader_queue.put((ran_mess, return_user, 'Null'))
                 elif message_type == "ack_inherit_kvs":
-                    # with key_value_store_lock and gemini_answers_lock:
-                    # print("RELEASED LOCKS")
-                    # key_value_store_lock.release()
-                    # gemini_answers_lock.release()
                     return_user = message['client_id']
                     key_value_store = message['kvs']
                     ballot_num = message['ballot_num']
                     curr_leader = message['curr_leader']
-                    print(f"Updated key value store {key_value_store}")
+                    # print(f"Updated key value store {key_value_store}")
                     client_socket.send((json.dumps({
                         "type": "ack_ack_inherit_kvs",
                         "return_user": return_user,
-                        "ballot_num": ballot_num
+                        "ballot_num": ballot_num,
+                        "kvs": key_value_store
                     })+'\n').encode())
                 elif message_type == "ack_ack_inherit_kvs":
                     leader_queue.get()
@@ -394,8 +462,8 @@ def timed_out(type):
     return
 
 def create_query_choose_context(message, query_from, LLM_answer):
-    global leader_queue, operation_queue
-    print(f"Trying to add to leader queue message = {message}")
+    global leader_queue, operation_queue, ran_mess, stop_elect_flag
+    # print(f"Trying to add to leader queue message = {message}")
     parts = message.split()
     input_type = parts[0]
     if input_type == "create":
@@ -434,11 +502,15 @@ def create_query_choose_context(message, query_from, LLM_answer):
     
     if curr_leader == 0:
         operation_queue.put((input1, input2, input3))
+        ran_mess = message
         propose()
     elif curr_leader == client_id:
+        ran_mess = message
         leader_queue.put((input1, input2, input3))
-        print(f"just added to leader queue ({input1} {input2} {input3})")
+        # print(f"just added to leader queue ({input1} {input2} {input3})")
     else:
+        ran_mess = message
+        print("Putting", message, "in operation queue")
         operation_queue.put((input1, input2, input3))
         send_to_leader(message)
         threading.Timer(10, timed_out, args=("operation",)).start()
@@ -463,7 +535,8 @@ def send_to_leader(message):
             "context_id": context_id,
             "query": query,
             "answer_num": answer_num,
-            "ballot_num": ballot_num
+            "ballot_num": ballot_num,
+            "kvs": key_value_store
         }) + '\n').encode())
 
 def view_context(message):
@@ -477,7 +550,7 @@ def view_all_context():
 
 def consensus_operation(input1, input2, input3):
     send_id1, send_id2 = get_other_server_ids()
-    print(f"Starting consensus op on {input1} {input2}")
+    print(f"Getting CONSENSUS on {input1} {input2}")
     if input3 == "create":
         context_id = input2
         ballot_num[2] += 1
@@ -487,14 +560,15 @@ def consensus_operation(input1, input2, input3):
             "send_id1": send_id1,
             "send_id2": send_id2,
             "client_id": client_id,
-            "ballot_num": ballot_num
+            "ballot_num": ballot_num,
+            "kvs": key_value_store
         })+'\n').encode())
     elif input3 == "choose":
         context_id = input1
         LLM_answer = input2
         query_from = input3
         ballot_num[2] += 1
-        decide_count[ballot_num[2]] = 0
+        decide_count[tuple(ballot_num)] = 0
         client_socket.send((json.dumps({
             "type": "propose_choose",
             "context_id": context_id,
@@ -503,13 +577,14 @@ def consensus_operation(input1, input2, input3):
             "send_id1": send_id1,
             "send_id2": send_id2,
             "client_id": client_id,
-            "ballot_num": ballot_num
+            "ballot_num": ballot_num,
+            "kvs": key_value_store
         })+'\n').encode())
     else:
         context_id = input1
         query = input2
         ballot_num[2] += 1
-        decide_count[ballot_num[2]] = 0
+        decide_count[tuple(ballot_num)] = 0
         client_socket.send((json.dumps({
             "type": "propose_query",
             "context_id": context_id,
@@ -518,29 +593,25 @@ def consensus_operation(input1, input2, input3):
             "send_id1": send_id1,
             "send_id2": send_id2,
             "client_id": client_id,
-            "ballot_num": ballot_num
+            "ballot_num": ballot_num,
+            "kvs": key_value_store
         })+'\n').encode())
     return
 
 def leader_queue_thread():
-    global curr_leader, leader_queue, operation_queue, consensus_flag
+    global curr_leader, leader_queue, operation_queue, consensus_flag, timeout_flag_proposal
     while True:
         with consensus_flag_lock:
             if curr_leader == client_id and not leader_queue.empty() and consensus_flag:
                 print("Handling a leader operation")
                 consensus_flag = False
                 input1, input2, input3 = leader_queue.queue[0]
-                if input1 == "inherit_lock":
-                    client_socket.send((json.dumps({
-                            "type": "ack_inherit_kvs",
-                            "ballot_num": ballot_num,
-                            "kvs": key_value_store,
-                            "curr_leader": client_id,
-                            "client_id": client_id,
-                            "return_user": input2
-                        })+'\n').encode())
-                else:
+                if ballot_num[1] == client_id:
                     consensus_operation(input1, input2, input3)
+                else:
+                    curr_leader = ballot_num[1]
+                    leader_queue = leader_queue.queue.clear()
+                    timeout_flag_proposal = False
 
 def valid_input(message):
     parts = message.split()
@@ -559,7 +630,7 @@ def valid_input(message):
 
 if __name__ == "__main__":
     global port
-    testing_purposes(True)
+    # testing_purposes(True)
     if len(sys.argv) < 3:
         sys.exit(1)
     port = int(sys.argv[2])
