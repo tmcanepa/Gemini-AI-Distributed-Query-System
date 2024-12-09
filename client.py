@@ -188,7 +188,7 @@ def handle_messages():
             if bal[2] > ballot_num[2] + 1:
                 # print("UPDATING KVS FOR BALLOT", bal)
                 key_value_store = message['kvs']
-                gemini_answers = message['gemini_answers']
+                gemini_answers = defaultdict(lambda: [None, None, None], message['gemini_answers'])
             if bool_json:
                 message_type = message['type']
                 if message_type == "prepare":
@@ -197,7 +197,7 @@ def handle_messages():
                         # print("UPDATING KVS FOR BALLOT", bal)
                         # print("NEW KVS", message['kvs'])
                         key_value_store = message['kvs']
-                        gemini_answers = message['gemini_answers']
+                        gemini_answers = defaultdict(lambda: [None, None, None], message['gemini_answers'])
 
                     proposer = message['proposer']
                     with print_lock:
@@ -227,7 +227,7 @@ def handle_messages():
                     timeout_flag_proposal = False
                     if bal[2] >= ballot_num[2]: #Update if equal since you want to take their kvs if yours was bad
                         key_value_store = message['kvs']
-                        gemini_answers = message['gemini_answers']
+                        gemini_answers = defaultdict(lambda: [None, None, None], message['gemini_answers'])
                         ballot_num = bal
                         if curr_leader != client_id:
                             if acceptval != "Null":
@@ -354,6 +354,7 @@ def handle_messages():
                         with print_lock:
                             print(f"Received DECIDE {bal} query {context_id} {query} from Server {candidate}")
                         with key_value_store_lock and gemini_answers_lock:
+                            gemini_answers.setdefault(context_id, [None, None, None])
                             gemini_answers[context_id][candidate-1] = LLM_answer
                             if query_from == client_id:
                                 with print_lock:
@@ -490,8 +491,8 @@ def create_query_choose_context(message, client_id_local, LLM_answer):
                 print(f"Could not process query = {input2} for context id = {input1} because that context id has not been created yet!")
                 return
         with gemini_answers_lock:
-            # print(f"gemini answers = {gemini_answers[input1]}")
-            if gemini_answers[input1] != [None, None,None]:  
+            # print(f"gemini answers = {gemini_answers}")
+            if input1 in gemini_answers and gemini_answers[input1] != [None, None,None]:  
                 print(f"Sorry we can not process another query for context id = {input1} until an answer has been chosen for the previous query!")
                 return
     elif input_type == "choose":
