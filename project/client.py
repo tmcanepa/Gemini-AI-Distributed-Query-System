@@ -100,8 +100,8 @@ def propose():
         "kvs": key_value_store,
         "gemini_answers": gemini_answers
     })+'\n').encode())
-    with print_lock:
-        print(f"Sending PREPARE {ballot_num} to ALL")
+    # with print_lock:
+    #     print(f"Sending PREPARE {ballot_num} to ALL")
     threading.Timer(15, timed_out, args=("proposal","Null")).start()
     return
 
@@ -115,8 +115,8 @@ def promise(bal, proposer):
         "kvs": key_value_store,
         "gemini_answers": gemini_answers
     })+'\n').encode())
-    with print_lock:
-        print(f"Sending PROMISE {bal} to Server {proposer}")
+    # with print_lock:
+    #     print(f"Sending PROMISE {bal} to Server {proposer}")
 
 def accept(promiser, bal):
     client_socket.send((json.dumps({
@@ -127,8 +127,8 @@ def accept(promiser, bal):
         "kvs": key_value_store,
         "gemini_answers": gemini_answers
     })+'\n').encode())
-    with print_lock:
-        print(f"Sending ACCEPT {bal} to Server {promiser}")
+    # with print_lock:
+    #     print(f"Sending ACCEPT {bal} to Server {promiser}")
 
 def delete_from_operation_queue(input1, input2, input3):
     global operation_queue
@@ -203,8 +203,8 @@ def handle_messages():
                         gemini_answers = defaultdict(lambda: [None, None, None], message['gemini_answers'])
 
                     proposer = message['proposer']
-                    with print_lock:
-                        print(f"Received PREPARE {bal} from Server {proposer}")
+                    # with print_lock:
+                    #     print(f"Received PREPARE {bal} from Server {proposer}")
                     # print("Ballots: ", bal, ballot_num)
                     if bal >= ballot_num:
                         if bal[2] < ballot_num[2]:
@@ -224,8 +224,8 @@ def handle_messages():
                     #     operation_queue.queue.clear()
                     promiser = message['promiser']
                     time.sleep(.5)
-                    with print_lock:
-                        print(f"Received PROMISE {bal} from Server {promiser}")
+                    # with print_lock:
+                    #     print(f"Received PROMISE {bal} from Server {promiser}")
                     # print(f"curr leader = {curr_leader} and leader queue = {leader_queue.queue}")
                     timeout_flag_proposal = False
                     if bal[2] >= ballot_num[2]: #Update if equal since you want to take their kvs if yours was bad
@@ -254,8 +254,8 @@ def handle_messages():
                         # print("NEW KVS", message['kvs'])
                         key_value_store = message['kvs']
                         gemini_answers = message['gemini_answers']
-                    with print_lock:
-                        print(f"Received ACCEPT {bal} from Server {client_id_local}")
+                    # with print_lock:
+                    #     print(f"Received ACCEPT {bal} from Server {client_id_local}")
                     # print(f"{curr_leader} is the leader")
                 elif message_type == "propose_query":
                     send_id1, send_id2 = get_other_server_ids()
@@ -268,8 +268,8 @@ def handle_messages():
                         ballot_num = bal
                         #update accept num and accept val
                         pass
-                    with print_lock:
-                        print(f"Received ACCEPTED {bal} query {context_id} {query} from Server {client_id_local}")
+                    # with print_lock:
+                    #     print(f"Received ACCEPTED {bal} query {context_id} {query} from Server {client_id_local}")
                     LLM_answer = ask_gemini(key_value_store[context_id] + query, context_id, query_from)
                     if bal >= ballot_num:
                         client_socket.send((json.dumps({
@@ -285,8 +285,8 @@ def handle_messages():
                             "kvs": key_value_store,
                             "gemini_answers": gemini_answers
                         }) + '\n').encode())
-                        with print_lock:
-                            print(f"Sending DECIDE {bal} query {context_id} {query} to ALL")
+                        # with print_lock:
+                        #     print(f"Sending DECIDE {bal} query {context_id} {query} to ALL")
                 elif message_type == "propose_choose":
                     send_id1, send_id2 = get_other_server_ids()
                     context_id = message['context_id']
@@ -298,8 +298,8 @@ def handle_messages():
                     if bal >= ballot_num:
                         ballot_num = bal
                         pass
-                    with print_lock:
-                        print(f"Received ACCEPTED {bal} answer {answer_num} {LLM_answer} from Server {client_id_local}")
+                    # with print_lock:
+                    #     print(f"Received ACCEPTED {bal} answer {answer_num} {LLM_answer} from Server {client_id_local}")
                     if bal >= ballot_num:
                         client_socket.send((json.dumps({
                             "type": "decide_choose",
@@ -314,8 +314,8 @@ def handle_messages():
                             "kvs": key_value_store,
                             "gemini_answers": gemini_answers
                         }) + '\n').encode())
-                        with print_lock:
-                            print(f"Sending DECIDE {bal} answer {answer_num} {LLM_answer} to ALL")
+                        # with print_lock:
+                        #     print(f"Sending DECIDE {bal} answer {answer_num} {LLM_answer} to ALL")
                 elif message_type == "propose_create":
                     bal = message['ballot_num']
                     if bal >= ballot_num:
@@ -324,8 +324,8 @@ def handle_messages():
                     send_id1, send_id2 = get_other_server_ids()
                     context_id = message['context_id']
                     client_id_local = message['client_id']
-                    with print_lock:
-                        print(f"Received ACCEPTED {bal} create {context_id} from Server {client_id_local}")
+                    # with print_lock:
+                    #     print(f"Received ACCEPTED {bal} create {context_id} from Server {client_id_local}")
                     if bal >= ballot_num:
                         client_socket.send((json.dumps({
                             "type": "decide_create",
@@ -337,8 +337,8 @@ def handle_messages():
                             "kvs": key_value_store,
                             "gemini_answers": gemini_answers
                         }) + '\n').encode())
-                        with print_lock:
-                            print(f"Sending DECIDE {bal} create {context_id} to ALL")
+                        # with print_lock:
+                        #     print(f"Sending DECIDE {bal} create {context_id} to ALL")
                 elif message_type == "decide_query":
                     bal = message['ballot_num']
                     with decide_count_lock and consensus_flag_lock:
@@ -354,8 +354,8 @@ def handle_messages():
                                 leader_queue.get() #Remove from leader queue now that query is decided
                                 consensus_flag_dct[f"query {context_id} {query}"] = True
                                 consensus_flag = True
-                        with print_lock:
-                            print(f"Received DECIDE {bal} query {context_id} {query} from Server {candidate}")
+                        # with print_lock:
+                        #     print(f"Received DECIDE {bal} query {context_id} {query} from Server {candidate}")
                         with key_value_store_lock and gemini_answers_lock:
                             gemini_answers.setdefault(context_id, [None, None, None])
                             gemini_answers[context_id][candidate-1] = LLM_answer
@@ -364,8 +364,8 @@ def handle_messages():
                                     print(f"Context {context_id} - Candidate {candidate}: {LLM_answer}")
                             if decide_count[tuple(bal)] == 2:
                                 key_value_store[context_id] += f"QUERY: {query}\n"
-                                with print_lock:
-                                    print(f"NEW Query on {context_id} with {key_value_store[context_id]}")
+                                # with print_lock:
+                                #     print(f"NEW Query on {context_id} with {key_value_store[context_id]}")
                 elif message_type == "decide_choose":
                     bal = message['ballot_num']
                     with decide_count_lock and consensus_flag_lock:
@@ -380,8 +380,8 @@ def handle_messages():
                                 leader_queue.get() #Remove from leader queue now that query is decided
                                 consensus_flag_dct[f"choose {context_id} {answer_num}"] = True
                                 consensus_flag = True
-                        with print_lock:
-                            print(f"Received DECIDE {bal} answer {answer_num} {LLM_answer} from Server {client_id_local}")
+                        # with print_lock:
+                        #     print(f"Received DECIDE {bal} answer {answer_num} {LLM_answer} from Server {client_id_local}")
                         with key_value_store_lock:
                             if decide_count[tuple(bal)] == 2:
                                 if len(LLM_answer) >= 7 and LLM_answer[:7] == "ANSWER:":
@@ -402,8 +402,8 @@ def handle_messages():
                                 leader_queue.get() #Remove from leader queue now that query is decided
                                 consensus_flag_dct[f"create {context_id}"] = True
                                 consensus_flag = True
-                        with print_lock:
-                            print(f"Received DECIDE {bal} create {context_id} from Server {client_id_local}")
+                        # with print_lock:
+                        #     print(f"Received DECIDE {bal} create {context_id} from Server {client_id_local}")
                         with key_value_store_lock:
                             if decide_count[tuple(bal)] == 2:
                                 key_value_store[context_id] = ""
@@ -416,8 +416,8 @@ def handle_messages():
                     input_type = message['input_type']
                     context_id = message["context_id"]
                     additional_print = message["additional_print"]
-                    with print_lock:
-                        print(f"Received FORWARD {ballot_num} {input_type} {context_id} {additional_print} from Server {client_id_local}")
+                    # with print_lock:
+                    #     print(f"Received FORWARD {ballot_num} {input_type} {context_id} {additional_print} from Server {client_id_local}")
                     client_socket.send((json.dumps(message) + '\n').encode())
                     with print_lock:
                         print(f"Sending ACK {ballot_num} {input_type} {context_id} {additional_print}to Server {client_id_local}") #the lack of gap is intentional for print format
@@ -430,8 +430,8 @@ def handle_messages():
                     context_id = message["context_id"]
                     query = message["query"]
                     additional_print = message["additional_print"]
-                    with print_lock:
-                        print(f"Received ACK {ballot_num} {input_type} {context_id} {additional_print}from Server {client_id_local}") #the lack of gap is intentional for print format
+                    # with print_lock:
+                    #     print(f"Received ACK {ballot_num} {input_type} {context_id} {additional_print}from Server {client_id_local}") #the lack of gap is intentional for print format
                     if input_type == "query":
                         delete_from_operation_queue(context_id, query, client_id_local)
                     if input_type == "create":
@@ -563,7 +563,7 @@ def send_to_leader(message):
             "gemini_answers": gemini_answers,
             "additional_print" : additional_print
         }) + '\n').encode())
-        print(f"Sending FORWARD {ballot_num} {input_type} {context_id} {additional_print}to Server {curr_leader}") #the gap is intentioinal
+        # print(f"Sending FORWARD {ballot_num} {input_type} {context_id} {additional_print}to Server {curr_leader}") #the gap is intentioinal
 
 def view_context(message):
     _, context_id = message.split()
@@ -592,7 +592,7 @@ def consensus_operation(input1, input2, input3):
             "gemini_answers": gemini_answers
         })+'\n').encode())
         consensus_key = f"create {context_id}" 
-        print(f"Sending ACCEPTED {ballot_num} create {context_id} to ALL")
+        # print(f"Sending ACCEPTED {ballot_num} create {context_id} to ALL")
     elif input3 == "choose":
         context_id = input1
         answer_num = input2
@@ -617,7 +617,7 @@ def consensus_operation(input1, input2, input3):
             "gemini_answers": gemini_answers
         })+'\n').encode())
         consensus_key = f"choose {context_id} {answer_num}" 
-        print(f"Sending ACCEPTED {ballot_num} answer {answer_num} {LLM_answer} to ALL")
+        # print(f"Sending ACCEPTED {ballot_num} answer {answer_num} {LLM_answer} to ALL")
     else:
         context_id = input1
         query = input2
@@ -637,7 +637,7 @@ def consensus_operation(input1, input2, input3):
             "gemini_answers": gemini_answers
         })+'\n').encode())
         consensus_key = f"query {context_id} {query}"
-        print(f"Sending ACCEPTED {ballot_num} query {context_id} {query} to ALL")
+        # print(f"Sending ACCEPTED {ballot_num} query {context_id} {query} to ALL")
     consensus_flag_dct[consensus_key] = False
     prev = consensus_key
     threading.Timer(15, timed_out, args=("consensus",consensus_key)).start()
