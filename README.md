@@ -10,7 +10,7 @@
 
 To test or use this project, ensure you have the following installed:
 
-- [Python 3.12.1 or earlier](https://www.python.org/downloads/)  
+- [Python 3.12.1 or newer](https://www.python.org/downloads/)  
 - Any required packages listed in `requirements.txt` (e.g., `gemini`, `socket`).  
 - A Gemini API [KEY](https://ai.google.dev/gemini-api/docs/api-key)  
 
