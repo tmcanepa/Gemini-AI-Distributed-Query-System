@@ -10,9 +10,9 @@
 
 To test or use this project, ensure you have the following installed:
 
-- [Python 3.12.1 or earlier](https://www.python.org/downloads/)
-- Any required packages listed in `requirements.txt` (e.g., `gemini`, `socket`).
-- A Gemini API [KEY](https://ai.google.dev/gemini-api/docs/api-key)
+- [Python 3.12.1 or earlier](https://www.python.org/downloads/)  
+- Any required packages listed in `requirements.txt` (e.g., `gemini`, `socket`).  
+- A Gemini API [KEY](https://ai.google.dev/gemini-api/docs/api-key)  
 
 ## Setup
 
@@ -28,9 +28,9 @@ To test or use this project, ensure you have the following installed:
    ```
 
 3. Configure your .env file:
-  There should be a .env.example with how your .env file should look.
-  a. Copy the `.env.example` into a new `.env` file
-  b. Add your Gemini API key to the `.env` file:
+  There should be a .env.example with how your .env file should look.  
+  a. Copy the `.env.example` into a new `.env` file  
+  b. Add your Gemini API key to the `.env` file  
 
 
 4. Ensure all files are in the correct directory structure as specified in the project.
@@ -38,20 +38,20 @@ To test or use this project, ensure you have the following installed:
 ## How to Use
 
 ### Terminal Setup
-This project requires multiple terminals to run different components. Follow these steps:
-Start by entering the project portion of the code:
+This project requires multiple terminals to run different components. Follow these steps:  
+Start by entering the project portion of the code:  
 ```bash
    cd project
 ```
 
 #### Terminal 1: Start the Network Connection Server
-Start the network linkage server to allow for message passing between clients:
-Select any desired PORT number but keep in consistent across both server and clients
-WINDOWS
+Start the network linkage server to allow for message passing between clients:  
+Select any desired PORT number but keep in consistent across both server and clients  
+WINDOWS  
 ```bash
 python server.py [$(PORT)]
 ```
-MAC/LINUX
+MAC/LINUX  
 ```bash
 make server
 ```
