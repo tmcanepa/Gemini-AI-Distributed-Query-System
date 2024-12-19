@@ -3,6 +3,7 @@ import threading
 import sys
 import time
 import json
+import os
 
 clients = [None] * 3
 sockets = {}
@@ -140,7 +141,7 @@ def primary_input_thread(): # primary input thread
     global running
     while running:
         command = input()
-        print(f"Command = {command.lower()}")
+        # print(f"Command = {command.lower()}")
         if command.lower() == "exit":
             handle_exit()
         elif command.lower().startswith("faillink"):
@@ -163,11 +164,14 @@ def handle_exit(): # handles exits
         try:
             sock.close()
         except Exception as e:
-            print(e)
-            pass
-    clients.clear()
-    sys.stdout.flush()
-    sys.exit(0)
+            # print(e)
+            pass  
+    try:
+        clients.clear()
+        sys.stdout.flush()
+        os._exit(0)
+    except Exception as e:
+        pass
 
 def start_server(PORT): # Begins the input thread and accepts clients
     global server_socket,running,sockets,id_sockets
